@@ -15,23 +15,24 @@ else
   controlfolder="/roms/ports/PortMaster"
 fi
 
-source "$controlfolder/control.txt"
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
-
-GAMEDIR="/$directory/ports/ultracombo"
-# Some firmwares (Knulli) launch a port from its real folder and may not define
-# $directory the way PortMaster does. The port's own folder is where this
-# script lives, so use that when the constructed one is not there.
-if [ ! -d "$GAMEDIR" ]; then
-  GAMEDIR="$(cd "$(dirname "$0")" && pwd)/ultracombo"
+GAMEDIR="$(cd "$(dirname "$0")" && pwd)/ultracombo"
+if [ ! -d "$GAMEDIR" ] && [ -n "$directory" ]; then
+  GAMEDIR="/$directory/ports/ultracombo"
 fi
 cd "$GAMEDIR" || exit 1
 
-> "$GAMEDIR/log.txt" 2>/dev/null || true
-exec > >(tee "$GAMEDIR/log.txt") 2>&1 || exec >> "$GAMEDIR/log.txt" 2>&1
+exec >> "$GAMEDIR/log.txt" 2>&1
+
+USE_PORTMASTER=0
+if [ -n "$controlfolder" ] && [ -f "$controlfolder/control.txt" ]; then
+  source "$controlfolder/control.txt"
+  [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+  get_controls
+  USE_PORTMASTER=1
+fi
 
 echo "=== UltraCombo ARM64 (KillerArm) ==="
+echo "Date: $(date)"
 echo "Device: ${DEVICE_NAME:-unknown}  CFW: ${CFW_NAME:-unknown}  Arch: $(uname -m)"
 
 # Auto-extract ROM chips from any MAME zip in run/ if not already extracted
