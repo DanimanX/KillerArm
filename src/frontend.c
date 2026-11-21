@@ -1648,6 +1648,21 @@ int frontend_main(void)
         const char *db = find_data("gamecontrollerdb.txt", buf, sizeof buf);
         FILE *f = fopen(db, "rb");
         if (f) { fclose(f); SDL_GameControllerAddMappingsFromFile(db); }
+        const char *env_map = getenv("SDL_GAMECONTROLLERCONFIG");
+        if (env_map && *env_map) SDL_GameControllerAddMapping(env_map);
+        // Built-in mapping for Anbernic RG34XX / H700 handhelds
+        SDL_GameControllerAddMapping(
+            "19000000010000000100000000010000,Anbernic RG34XX Controller,platform:Linux,"
+            "b:b3,a:b4,dpdown:h0.4,leftx:a0,lefty:a1,lefttrigger:b12,dpleft:h0.8,"
+            "rightshoulder:b8,leftshoulder:b7,righttrigger:b13,dpright:h0.2,"
+            "back:b9,start:b10,dpup:h0.1,y:b6,x:b5,guide:b11,"
+        );
+        SDL_GameControllerAddMapping(
+            "19000000010000000100000002010000,Anbernic RG35XX Controller,platform:Linux,"
+            "b:b3,a:b4,dpdown:h0.4,leftx:a0,lefty:a1,lefttrigger:b12,dpleft:h0.8,"
+            "rightshoulder:b8,leftshoulder:b7,righttrigger:b13,dpright:h0.2,"
+            "back:b9,start:b10,dpup:h0.1,y:b6,x:b5,guide:b11,"
+        );
     }
     attach_test_pads();
     // Pads already connected. Their connect events may be gone: the game picker

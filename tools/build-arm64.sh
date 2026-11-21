@@ -222,6 +222,7 @@ cp portmaster/*.sh "$out/"
 chmod +x "$out/"*.sh
 cp portmaster/ultracombo/port.json "$out/ultracombo/"
 cp portmaster/ultracombo/gameinfo.xml "$out/ultracombo/"
+[ -f portmaster/ultracombo/gamecontrollerdb.txt ] && cp portmaster/ultracombo/gamecontrollerdb.txt "$out/ultracombo/"
 cp "$bdir/ultracombo.aarch64" "$out/ultracombo/ultracombo.aarch64"
 chmod +x "$out/ultracombo/ultracombo.aarch64"
 cp "$deps/tcc-arm64/libtcc.so" "$out/ultracombo/tools/tcc/libtcc.so"

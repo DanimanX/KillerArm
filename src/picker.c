@@ -102,6 +102,12 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
     if (db && *db) SDL_GameControllerAddMappingsFromFile(db);
     const char *env_map = getenv("SDL_GAMECONTROLLERCONFIG");
     if (env_map && *env_map) SDL_GameControllerAddMapping(env_map);
+    SDL_GameControllerAddMapping(
+        "19000000010000000100000000010000,Anbernic RG34XX Controller,platform:Linux,"
+        "b:b3,a:b4,dpdown:h0.4,leftx:a0,lefty:a1,lefttrigger:b12,dpleft:h0.8,"
+        "rightshoulder:b8,leftshoulder:b7,righttrigger:b13,dpright:h0.2,"
+        "back:b9,start:b10,dpup:h0.1,y:b6,x:b5,guide:b11,"
+    );
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     Uint32 wflags = SDL_WINDOW_RESIZABLE;
 #ifdef UC_HANDHELD
@@ -412,6 +418,12 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
     if (db && *db) SDL_GameControllerAddMappingsFromFile(db);
     const char *env_map = getenv("SDL_GAMECONTROLLERCONFIG");
     if (env_map && *env_map) SDL_GameControllerAddMapping(env_map);
+    SDL_GameControllerAddMapping(
+        "19000000010000000100000000010000,Anbernic RG34XX Controller,platform:Linux,"
+        "b:b3,a:b4,dpdown:h0.4,leftx:a0,lefty:a1,lefttrigger:b12,dpleft:h0.8,"
+        "rightshoulder:b8,leftshoulder:b7,righttrigger:b13,dpright:h0.2,"
+        "back:b9,start:b10,dpup:h0.1,y:b6,x:b5,guide:b11,"
+    );
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     Uint32 wflags = SDL_WINDOW_RESIZABLE;
 #ifdef UC_HANDHELD
