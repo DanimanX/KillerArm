@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/killerarm-banner.jpg" alt="KillerArm — UltraCombo ARM64 (Killer Instinct on Allwinner H700)" width="100%">
+</p>
+
 # KillerArm — UltraCombo ARM64 / Anbernic RG34XX Port
 
 [![Build ARM64 PortMaster](https://github.com/DanimanX/KillerArm/actions/workflows/build-arm64.yml/badge.svg)](https://github.com/DanimanX/KillerArm/actions/workflows/build-arm64.yml)
