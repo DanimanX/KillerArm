@@ -35,9 +35,17 @@ static const char *const button_names[NBUTTONS] = {
 };
 static const char *const p1_keys[NBUTTONS] = { "A", "S", "D", "Z", "X", "C", "Up", "Down", "Left", "Right", "1", "5" };
 static const char *const p2_keys[NBUTTONS] = { "T", "Y", "U", "G", "H", "B", "I", "K", "J", "L", "2", "6" };
+#ifdef UC_HANDHELD
+// Classic SNES Killer Instinct layout for handhelds:
+// Y=Med Punch, X=Fierce Punch, L=Quick Punch, B=Med Kick, A=Fierce Kick, R=Quick Kick
+static const char *const pad_defaults[NBUTTONS] = {
+    "leftshoulder", "y", "x", "rightshoulder", "b", "a", "dpup", "dpdown", "dpleft", "dpright", "start", "back",
+};
+#else
 static const char *const pad_defaults[NBUTTONS] = {
     "x", "y", "rightshoulder", "a", "b", "righttrigger", "dpup", "dpdown", "dpleft", "dpright", "start", "back",
 };
+#endif
 static const char *const hotkey_names[NHOTKEYS] = {
     "menu", "pause", "frame_advance", "fast_forward", "rewind", "save_state", "load_state", "next_slot",
     "fullscreen", "screenshot", "volume_up", "volume_down", "mute", "test", "service",
@@ -98,7 +106,11 @@ static void build_table(void)
     add_str("video", "shader_params", cfg.shader_params, "", "adjusted shader parameters (set from the menu)");
     add("video", "filter", T_ENUM, &cfg.filter, "sharp",
         "sharp (crisp pixels), smooth (sharpened bicubic), scanlines, crt (scanlines, mask, curvature)", filter_names);
+#ifdef UC_HANDHELD
+    add("video", "pacing", T_ENUM, &cfg.pacing, "audio",
+#else
     add("video", "pacing", T_ENUM, &cfg.pacing, "auto",
+#endif
         "audio: original 58.96 Hz timed by the sound card; vsync: tear-free, one frame per refresh on"
         " ~60 Hz displays (smooth, game runs 1.7% fast), timed by the clock on others; auto: vsync on ~60 Hz displays, else audio",
         pacing_names);

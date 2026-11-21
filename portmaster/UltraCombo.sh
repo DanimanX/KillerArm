@@ -57,9 +57,6 @@ fi
 if [ -z "$SDL_GAMECONTROLLERCONFIG" ]; then
   export SDL_GAMECONTROLLERCONFIG="19000000010000000100000000010000,Anbernic RG34XX Controller,platform:Linux,b:b3,a:b4,dpdown:h0.4,leftx:a0,lefty:a1,lefttrigger:b12,dpleft:h0.8,rightshoulder:b8,leftshoulder:b7,righttrigger:b13,dpright:h0.2,back:b9,start:b10,dpup:h0.1,y:b6,x:b5,guide:b11,"
 fi
-# Keep physical South/East/West/North positions consistent on Nintendo-labeled
-# handhelds such as the Anbernic RG34XX.
-export SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS=0
 export SDL_RENDER_VSYNC=1
 export KI2_GLES=1
 
