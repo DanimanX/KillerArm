@@ -31,7 +31,7 @@
 extern char **environ;
 #endif
 
-#define RECOMP_VERSION 4           // bump when recomp.c's or adsprec.c's output changes
+#define RECOMP_VERSION 5           // bump when recomp.c's, adsprec.c's or rec_gen.h's output changes
 #define SNAPSHOT_FRAMES game.snapshot_frames   // the game has loaded all of its code by then
 
 // rec_abi.h, rec_gen.h and adsp_core.h, embedded at build time (build/rec_headers.c)
@@ -130,13 +130,27 @@ static uint64_t build_key(void)
     return fnv(h, v, sizeof v);
 }
 
-static void cache_paths(char *dir, size_t n, char *module, size_t mn, char *src, size_t sn)
+static void cache_paths_arch(char *dir, size_t n, char *module, size_t mn, char *src, size_t sn, const char *arch)
 {
     char key[32];
     snprintf(key, sizeof key, "%016llx", (unsigned long long)build_key());
     snprintf(dir, n, "%scache", data_dir());
-    if (module) snprintf(module, mn, "%s/rec-%s" SO_EXT, dir, key);
+    if (module) snprintf(module, mn, "%s/rec-%s%s" SO_EXT, dir, key, arch ? arch : "");
     if (src) snprintf(src, sn, "%s/src-%s", dir, key);
+}
+
+static const char *native_arch_suffix(void)
+{
+#ifdef __aarch64__
+    return "-aarch64";
+#else
+    return "";
+#endif
+}
+
+static void cache_paths(char *dir, size_t n, char *module, size_t mn, char *src, size_t sn)
+{
+    cache_paths_arch(dir, n, module, mn, src, sn, native_arch_suffix());
 }
 
 // Written when TinyCC was the best compiler available: next time it is used
@@ -148,7 +162,7 @@ static void tcc_marker(const char *src, char *out, size_t n) { snprintf(out, n, 
 // Room for a link of every file the translator can write (MAX_FILES in
 // recomp.c) plus the compiler's own arguments. A command that doesn't fit
 // fails instead of quietly losing arguments.
-#define CMD_ARGS 96
+#define CMD_ARGS 144
 typedef struct { char *argv[CMD_ARGS]; int argc; bool overflow; } cmd_t;
 
 static void cmd_add(cmd_t *c, const char *a)
@@ -262,6 +276,35 @@ static int cpu_count(void)
 #endif
 }
 
+// Available system memory in MB (Linux /proc/meminfo), or 0 if unknown.
+// Used to throttle parallel compiler jobs on 1 GB handhelds so Clang/GCC
+// cannot trigger the OOM killer.
+static int available_mem_mb(void)
+{
+#ifdef __linux__
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    char line[128];
+    unsigned long kb = 0;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "MemAvailable: %lu kB", &kb) == 1) break;
+    }
+    fclose(f);
+    return (int)(kb / 1024);
+#else
+    return 0;
+#endif
+}
+
+static int safe_parallel_jobs(void)
+{
+    int n = cpu_count();
+    int mb = available_mem_mb();
+    if (mb > 0 && mb < 1500) return 1;
+    if (mb > 0 && mb < 3000 && n > 2) return 2;
+    return n;
+}
+
 // A program on PATH (or an absolute path) that exists.
 static bool find_program(const char *name, char *out, size_t n)
 {
@@ -311,23 +354,45 @@ static void source_name(char *out, size_t n, const char *src, int i)
     else snprintf(out, n, "%s/rec_dsp_%d.c", src, i - nsources - 2);
 }
 
-// zig = true: "zig cc" (bundled), else a gcc/clang driver.
-static bool build_with(const char *cc, bool zig, const char *src, const char *module, const char *log)
+// Format -mcpu=... matching driver syntax (Zig uses underscores: cortex_a53;
+// GCC/Clang uses hyphens: cortex-a53).
+static void format_mcpu(char *out, size_t n, const char *cpu, bool zig)
 {
-    cmd_t jobs[80];
+    snprintf(out, n, "-mcpu=%s", cpu);
+    for (char *p = out + 6; *p; p++) {
+        if (zig && *p == '-') *p = '_';
+        if (!zig && *p == '_') *p = '-';
+    }
+}
+
+// zig = true: "zig cc", else a gcc/clang driver.
+static bool build_with_opts(const char *cc, bool zig, const char *target, const char *cpu,
+                            const char *opt, int parallel, const char *src, const char *module, const char *log)
+{
+    cmd_t jobs[128];
+    if (ALL_SOURCES > 128) return false;
     int n = 0;
-    char obj[2200], file[2200];
+    char obj[2200], file[2200], mcpu[64];
     for (int i = 0; i < ALL_SOURCES; i++) {
         cmd_t *c = &jobs[n++];
         c->argc = 0;
+        c->overflow = false;
         cmd_add(c, cc);
         if (zig) cmd_add(c, "cc");
+        if (zig && target) { cmd_add(c, "-target"); cmd_add(c, target); }
 #ifdef _WIN32
-        if (zig) { cmd_add(c, "-target"); cmd_add(c, "x86_64-windows-gnu"); }
-#else
-        cmd_add(c, "-fPIC");
+        else if (zig) { cmd_add(c, "-target"); cmd_add(c, "x86_64-windows-gnu"); }
 #endif
-        cmd_add(c, "-O1");
+        if (target ||
+#ifndef _WIN32
+            true
+#else
+            false
+#endif
+        ) cmd_add(c, "-fPIC");
+        if (cpu && *cpu) { format_mcpu(mcpu, sizeof mcpu, cpu, zig); cmd_add(c, mcpu); }
+        cmd_add(c, opt);
+        cmd_add(c, "-fno-strict-aliasing");
         cmd_add(c, "-fvisibility=hidden");
         cmd_add(c, "-fno-stack-protector");
         cmd_add(c, "-DREC_MODULE");
@@ -342,20 +407,25 @@ static bool build_with(const char *cc, bool zig, const char *src, const char *mo
         cmd_add(c, obj);
     }
     compile_from = 0.35; compile_to = 0.9;
-    bool ok = run_all(jobs, n, cpu_count(), log, compile_tick);
+    bool ok = run_all(jobs, n, parallel, log, compile_tick);
     for (int i = 0; i < n; i++) cmd_free(&jobs[i]);
     if (!ok) return false;
 
     cmd_t link = { .argc = 0 };
     cmd_add(&link, cc);
     if (zig) cmd_add(&link, "cc");
+    if (zig && target) { cmd_add(&link, "-target"); cmd_add(&link, target); }
 #ifdef _WIN32
-    if (zig) { cmd_add(&link, "-target"); cmd_add(&link, "x86_64-windows-gnu"); }
+    else if (zig) { cmd_add(&link, "-target"); cmd_add(&link, "x86_64-windows-gnu"); }
 #endif
     cmd_add(&link, "-shared");
+    if (target ||
 #ifndef _WIN32
-    cmd_add(&link, "-nostdlib");                 // the module needs nothing from the C library
+        true
+#else
+        false
 #endif
+    ) cmd_add(&link, "-nostdlib");               // the module needs nothing from the C library
     cmd_add(&link, "-o");
     cmd_add(&link, module);
     for (int i = 0; i < ALL_SOURCES; i++) {
@@ -366,7 +436,32 @@ static bool build_with(const char *cc, bool zig, const char *src, const char *mo
     if (progress_cb) progress_cb("Linking", 0.92);
     ok = run_all(&link, 1, 1, log, NULL);
     cmd_free(&link);
+    for (int i = 0; i < ALL_SOURCES; i++) {      // clean intermediate .o files to save SD space
+        source_name(file, sizeof file, src, i);
+        snprintf(obj, sizeof obj, "%s.o", file);
+        remove(obj);
+    }
     return ok && file_exists(module);
+}
+
+static bool build_with(const char *cc, bool zig, const char *src, const char *module, const char *log)
+{
+    const char *env_opt = getenv("KI2_BUILD_OPT");
+    const char *opt = "-O1";
+    const char *cpu = NULL;
+    int mb = available_mem_mb();
+#ifdef __aarch64__
+    // In-order ARM64 cores (Cortex-A53) gain 25-40% from -O2 instruction
+    // scheduling and register allocation; drop to -O1 only if RAM is very tight.
+    opt = (mb > 0 && mb < 850) ? "-O1" : "-O2";
+#ifdef UC_HANDHELD
+    cpu = "cortex-a53";
+#endif
+#endif
+    if (env_opt && !strcmp(env_opt, "2")) opt = "-O2";
+    else if (env_opt && !strcmp(env_opt, "1")) opt = "-O1";
+    else if (env_opt && !strcmp(env_opt, "s")) opt = "-Os";
+    return build_with_opts(cc, zig, NULL, cpu, opt, safe_parallel_jobs(), src, module, log);
 }
 
 // TinyCC, loaded at run time (LGPL library shipped beside the program):
@@ -461,9 +556,14 @@ static int count_sources(const char *src)
 
 bool rec_build_load_cached(char *msg, size_t msglen)
 {
-    char dir[2048], module[2300], src[2300], err[512];
+    char dir[2048], module[2300], fallback[2300], src[2300], err[512];
     cache_paths(dir, sizeof dir, module, sizeof module, src, sizeof src);
     if (file_exists(module) && rec_build_load_file(module, err, sizeof err)) {
+        snprintf(msg, msglen, "translated code loaded");
+        return true;
+    }
+    cache_paths_arch(dir, sizeof dir, fallback, sizeof fallback, NULL, 0, "");
+    if (strcmp(module, fallback) && file_exists(fallback) && rec_build_load_file(fallback, err, sizeof err)) {
         snprintf(msg, msglen, "translated code loaded");
         return true;
     }
@@ -592,4 +692,92 @@ bool rec_build(rec_progress_fn progress, char *msg, size_t msglen)
     }
     if (progress) progress("Done", 1.0);
     return ok;
+}
+
+// Cross-compile a cached AArch64 module on a desktop machine so an ARM64
+// handheld (such as the 1 GB Anbernic RG34XX) loads -O2 cortex-a53 native
+// code instantly without compiling on-device.
+bool rec_build_cross_arm64(const char *cpu, char *msg, size_t msglen)
+{
+    progress_cb = NULL;
+    char dir[2048], module[2300], src[2300], log[2400], err[512];
+    cache_paths_arch(dir, sizeof dir, module, sizeof module, src, sizeof src, "-aarch64");
+    make_dir(dir);
+    make_dir(src);
+    snprintf(log, sizeof log, "%s/build-arm64.log", src);
+    remove(log);
+
+    uint32_t dsw = hw.dsw;
+    uint8_t *disk_head = malloc(IDE_TRACK_BYTES);
+    memcpy(disk_head, ide_tracked(), IDE_TRACK_BYTES);
+    machine_reset();
+    fprintf(stderr, "rec-arm64: booting %s on interpreter (%d frames)...\n", game.title, SNAPSHOT_FRAMES);
+    for (int f = 0; f < SNAPSHOT_FRAMES; f++) {
+        hw.p1 = hw.p2 = 0xffffffffu;
+        run_frame();
+    }
+    uint8_t *snap = malloc(RAM_SIZE);
+    memcpy(snap, ram, RAM_SIZE);
+    if (memcmp(disk_head, ide_tracked(), IDE_TRACK_BYTES)) {
+        memcpy(ide_tracked(), disk_head, IDE_TRACK_BYTES);
+        ide_tracked_changed();
+    }
+    free(disk_head);
+    hw.dsw = dsw;
+    machine_reset();
+
+    recomp_info_t info;
+    char abi[2300], gen[2300], core[2300];
+    snprintf(abi, sizeof abi, "%s/rec_abi.h", src);
+    snprintf(gen, sizeof gen, "%s/rec_gen.h", src);
+    snprintf(core, sizeof core, "%s/adsp_core.h", src);
+    adsprec_image_t img[6];
+    int nimg = sound_code_images(img, 6);
+    bool ok = recomp_generate(snap, snap + RAM0_SIZE, src, &info, err, sizeof err) &&
+              adsprec_generate(img, nimg, src, err, sizeof err) &&
+              write_file(abi, rec_abi_h) && write_file(gen, rec_gen_h) && write_file(core, adsp_core_h);
+    free(snap);
+    if (!ok) { snprintf(msg, msglen, "translation failed: %s", err); return false; }
+    nsources = info.files;
+
+    char cc[2048];
+    const char *zigs[] = { "tools/zig/zig" EXE_EXT, "deps/zig-linux/zig" EXE_EXT };
+    bool found_zig = false;
+    for (size_t i = 0; i < sizeof zigs / sizeof zigs[0]; i++) {
+        snprintf(cc, sizeof cc, "%s%s", base_dir(), zigs[i]);
+        if (file_exists(cc)) { found_zig = true; break; }
+    }
+    if (!found_zig && file_exists("deps/zig-linux/zig" EXE_EXT)) {
+        snprintf(cc, sizeof cc, "deps/zig-linux/zig" EXE_EXT);
+        found_zig = true;
+    }
+    if (!found_zig && find_program("zig", cc, sizeof cc)) found_zig = true;
+
+    const char *target_cpu = (cpu && *cpu) ? cpu : "cortex-a53";
+    if (found_zig) {
+        char zc[2200];
+        snprintf(zc, sizeof zc, "%scache/zig", data_dir());
+#ifdef _WIN32
+        _putenv_s("ZIG_GLOBAL_CACHE_DIR", zc); _putenv_s("ZIG_LOCAL_CACHE_DIR", zc);
+#else
+        setenv("ZIG_GLOBAL_CACHE_DIR", zc, 1); setenv("ZIG_LOCAL_CACHE_DIR", zc, 1);
+#endif
+        fprintf(stderr, "rec-arm64: cross-compiling %d units with %s (target aarch64-linux-gnu.2.28, -O2, %s)...\n",
+                ALL_SOURCES, cc, target_cpu);
+        ok = build_with_opts(cc, true, "aarch64-linux-gnu.2.28", target_cpu, "-O2", cpu_count(), src, module, log);
+        if (ok) {
+            snprintf(msg, msglen, "built %s (Zig -O2 %s)", module, target_cpu);
+            return true;
+        }
+    }
+    if (find_program("aarch64-linux-gnu-gcc", cc, sizeof cc)) {
+        fprintf(stderr, "rec-arm64: cross-compiling %d units with %s (-O2, %s)...\n", ALL_SOURCES, cc, target_cpu);
+        ok = build_with_opts(cc, false, "aarch64-linux-gnu", target_cpu, "-O2", cpu_count(), src, module, log);
+        if (ok) {
+            snprintf(msg, msglen, "built %s (aarch64-linux-gnu-gcc -O2 %s)", module, target_cpu);
+            return true;
+        }
+    }
+    snprintf(msg, msglen, "failed (need Zig in deps/zig-linux or PATH, or aarch64-linux-gnu-gcc; see %s)", log);
+    return false;
 }

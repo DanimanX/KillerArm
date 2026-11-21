@@ -136,9 +136,19 @@ static void hist_drop_oldest(void)
     hist_count--;
 }
 
+static void ensure_mirror(void)
+{
+    if (mirror) return;
+    mirror = malloc((size_t)NPAGES * PAGE);
+    scratch = malloc(sizeof(entry_t) + core_len + (size_t)NPAGES * (PAGE + 16));
+    for (int g = 0; g < NPAGES; g++) { memcpy(mirror + (size_t)g * PAGE, page_ptr(g), PAGE); *dirty_flag(g) = 0; }
+    core_io(core, false);
+}
+
 void state_set_history(size_t bytes)
 {
     hist_budget = bytes;
+    if (bytes && !mirror) ensure_mirror();
     while (hist_count && (hist_bytes > hist_budget || !bytes)) hist_drop_oldest();
 }
 
@@ -148,19 +158,23 @@ size_t state_history_bytes(void) { return hist_bytes; }
 void state_init(void)
 {
     core_len = core_io(NULL, false);
-    if (!mirror) {
-        mirror = malloc((size_t)NPAGES * PAGE);
+    if (!core) {
         core = malloc(core_len);
         core_tmp = malloc(core_len);
-        scratch = malloc(sizeof(entry_t) + core_len + (size_t)NPAGES * (PAGE + 16));
     }
-    for (int g = 0; g < NPAGES; g++) { memcpy(mirror + (size_t)g * PAGE, page_ptr(g), PAGE); *dirty_flag(g) = 0; }
+    if (hist_budget && !mirror) ensure_mirror();
+    if (mirror) {
+        for (int g = 0; g < NPAGES; g++) { memcpy(mirror + (size_t)g * PAGE, page_ptr(g), PAGE); *dirty_flag(g) = 0; }
+    } else {
+        for (int g = 0; g < NPAGES; g++) *dirty_flag(g) = 0;
+    }
     core_io(core, false);
     while (hist_count) hist_drop_oldest();
 }
 
 void state_checkpoint(void)
 {
+    if (!mirror) { ensure_mirror(); return; }
     uint8_t *p = NULL;
     entry_t *e = NULL;
     if (hist_budget) {
@@ -202,6 +216,7 @@ void state_checkpoint(void)
 
 void state_rollback(void)
 {
+    if (!mirror) return;
     for (int g = 0; g < NPAGES; g++) {
         uint8_t *df = dirty_flag(g);
         if (!*df) continue;

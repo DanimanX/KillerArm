@@ -74,11 +74,16 @@ static void draw_label(uint32_t *px, int x, int y, const char *s)
     draw_text(px, x + 3, y + 2, s, 0xffffff);
 }
 
+bool osd_message_active(void)
+{
+    if (msg[0] && SDL_TICKS_PASSED(SDL_GetTicks(), msg_until)) msg[0] = 0;
+    return msg[0] != 0;
+}
+
 void osd_draw(uint32_t *px, const char *status)
 {
     if (status && *status) draw_label(px, 320 - 4 - ((int)strlen(status) * 6 + 5), 4, status);
-    if (msg[0] && SDL_TICKS_PASSED(SDL_GetTicks(), msg_until)) msg[0] = 0;
-    if (msg[0]) draw_label(px, 4, 240 - 15, msg);
+    if (osd_message_active()) draw_label(px, 4, 240 - 15, msg);
 }
 
 // A centred panel: title, then one row per item with the selected one highlighted.

@@ -126,8 +126,13 @@ bool adsprec_generate(const adsprec_image_t *img, int n, const char *outdir, cha
             fputs(prologue, f);
             fprintf(f,
                 "// the start of one pass of adsp_run's loop, then fetch and sequencing\n"
-                "#define AT(at, k) if (cyc <= 0 || !ok[k]) goto out; \\\n"
-                "    if (irq_raised() && !irq_seen(&seen)) { if (irq_step()) goto irq; irq_remember(&seen); }\n"
+                "#if defined(__GNUC__) && !defined(__TINYC__)\n"
+                "#define ADSP_UNLIKELY(x) __builtin_expect(!!(x), 0)\n"
+                "#else\n"
+                "#define ADSP_UNLIKELY(x) (x)\n"
+                "#endif\n"
+                "#define AT(at, k) if (ADSP_UNLIKELY(cyc <= 0 || !ok[k])) goto out; \\\n"
+                "    if (ADSP_UNLIKELY(irq_raised() && !irq_seen(&seen))) { if (irq_step()) goto irq; irq_remember(&seen); }\n"
                 "#define SEQ(at, next) if (A.loop_end != at) A.pc = next; else sequence_loop_end();\n"
                 "#define SEQ_END(at, next) if (A.loop_end != at) A.pc = next; else loop_end_step();   // a DO UNTIL's end\n"
                 "#define TICK clock_cycle(); cyc--;\n\n");

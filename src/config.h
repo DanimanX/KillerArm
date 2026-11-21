@@ -36,6 +36,7 @@ typedef struct {
     char shader[1024];         // libretro .glslp preset, relative to the program folder
     char shader_params[1024];  // "name=value;..." changed parameters of that preset
     int  pacing;
+    bool frameskip;            // skip presenting a frame when emulation falls behind (handhelds)
 
     int  volume;               // 0-100
     int  audio_latency_ms;

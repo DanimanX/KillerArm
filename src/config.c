@@ -80,7 +80,11 @@ static void build_table(void)
     add_str("paths", "disk", cfg.disk, "", disk_help);
     add_str("paths", "sound", cfg.sound, "", sound_help);
 
+#ifdef UC_HANDHELD
+    add("video", "fullscreen", T_BOOL, &cfg.fullscreen, "yes", "start in fullscreen (toggle with the fullscreen hotkey or Alt+Enter)", 0);
+#else
     add("video", "fullscreen", T_BOOL, &cfg.fullscreen, "no", "start in fullscreen (toggle with the fullscreen hotkey or Alt+Enter)", 0);
+#endif
     add("video", "fullscreen_exclusive", T_BOOL, &cfg.fullscreen_exclusive, "no", "exclusive fullscreen (sets the display mode) instead of borderless", 0);
     add_str("video", "fullscreen_mode", cfg.fullscreen_mode, "", "display mode for exclusive fullscreen, e.g. 1920x1080@60; empty = current");
     add("video", "window_scale", T_INT, &cfg.window_scale, "3", "initial window size as a multiple of 320x240", 0);
@@ -98,9 +102,15 @@ static void build_table(void)
         "audio: original 58.96 Hz timed by the sound card; vsync: tear-free, one frame per refresh on"
         " ~60 Hz displays (smooth, game runs 1.7% fast), timed by the clock on others; auto: vsync on ~60 Hz displays, else audio",
         pacing_names);
+    add("video", "frameskip", T_BOOL, &cfg.frameskip, "no",
+        "auto frameskip (max 1 consecutive skip) if a heavy frame exceeds budget on low-power handhelds", 0);
 
     add("audio", "volume", T_INT, &cfg.volume, "100", "0-100", 0);
+#ifdef UC_HANDHELD
+    add("audio", "latency_ms", T_INT, &cfg.audio_latency_ms, "90", "audio buffer; lower = less delay, more risk of crackle", 0);
+#else
     add("audio", "latency_ms", T_INT, &cfg.audio_latency_ms, "70", "audio buffer; lower = less delay, more risk of crackle", 0);
+#endif
 
     add("system", "pause_unfocused", T_BOOL, &cfg.pause_unfocused, "no", "pause while the window is in the background", 0);
     add("system", "mute_unfocused", T_BOOL, &cfg.mute_unfocused, "no", "mute while the window is in the background", 0);
@@ -117,8 +127,13 @@ static void build_table(void)
         snprintf(runahead_help, sizeof runahead_help, "0-2: emulate ahead to show input sooner; this game has no "
                  "input lag of its own, so 0 is as the arcade played");
     add("system", "run_ahead", T_INT, &cfg.run_ahead, "0", runahead_help, 0);
+#ifdef UC_HANDHELD
+    add("system", "rewind", T_BOOL, &cfg.rewind, "no", "keep a rewind history (hold the rewind hotkey)", 0);
+    add("system", "rewind_mb", T_INT, &cfg.rewind_mb, "32", "memory for it; about 85 KB per frame (32 MB = ~6 s, safe for 1 GB RAM)", 0);
+#else
     add("system", "rewind", T_BOOL, &cfg.rewind, "yes", "keep a rewind history (hold the rewind hotkey)", 0);
     add("system", "rewind_mb", T_INT, &cfg.rewind_mb, "256", "memory for it; about 85 KB per frame (256 MB = ~50 s)", 0);
+#endif
     add("system", "input_display", T_BOOL, &cfg.input_display, "no", "show both players' recent inputs (numpad notation)", 0);
     add("system", "training", T_BOOL, &cfg.training, "no",
         "training mode: health refills after each combo, the clock stops (start a 2-player game for a dummy)", 0);

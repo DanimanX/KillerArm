@@ -1,9 +1,26 @@
-// OpenGL entry points, fetched through SDL at runtime (nothing links against
-// libGL / opengl32). video.c defines them; shaders.c uses them too.
+// OpenGL / OpenGL ES entry points, fetched through SDL at runtime (nothing
+// links against libGL / libGLESv2 / opengl32). video.c defines them;
+// shaders.c uses them too.
 #pragma once
 #include <SDL2/SDL.h>
+#ifdef UC_GLES
+#ifndef SDL_USE_BUILTIN_OPENGL_DEFINITIONS
+#define SDL_USE_BUILTIN_OPENGL_DEFINITIONS 1
+#endif
+#include <SDL2/SDL_opengles2.h>
+#ifndef APIENTRY
+#define APIENTRY GL_APIENTRY
+#endif
+#else
 #include <SDL2/SDL_opengl.h>
+#endif
 
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
+#ifndef GL_RGBA8
+#define GL_RGBA8 0x8058
+#endif
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER 0x8D40
 #define GL_COLOR_ATTACHMENT0 0x8CE0

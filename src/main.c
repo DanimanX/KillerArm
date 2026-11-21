@@ -36,6 +36,9 @@
 #include "launch.h"
 #include "picker.h"
 #include "version.h"
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -344,6 +347,29 @@ void to_rgb(uint32_t *dst)
         }
 }
 
+void to_rgb565(uint16_t *dst)
+{
+    const uint16_t *src = video_base();
+    int i = 0;
+#ifdef __ARM_NEON
+    uint16x8_t m_rb = vdupq_n_u16(0x001fu);
+    uint16x8_t m_g = vdupq_n_u16(0x03e0u);
+    uint16x8_t m_g4 = vdupq_n_u16(0x0200u);
+    for (; i < 320 * 240; i += 8) {
+        uint16x8_t p = vld1q_u16(src + i);
+        uint16x8_t r = vshlq_n_u16(vandq_u16(p, m_rb), 11);
+        uint16x8_t g = vorrq_u16(vshlq_n_u16(vandq_u16(p, m_g), 1), vshrq_n_u16(vandq_u16(p, m_g4), 4));
+        uint16x8_t b = vandq_u16(vshrq_n_u16(p, 10), m_rb);
+        vst1q_u16(dst + i, vorrq_u16(vorrq_u16(r, g), b));
+    }
+#else
+    for (; i < 320 * 240; i++) {
+        uint16_t p = src[i];
+        dst[i] = (uint16_t)(((p & 0x001fu) << 11) | ((p & 0x03e0u) << 1) | ((p & 0x0200u) >> 4) | ((p >> 10) & 0x001fu));
+    }
+#endif
+}
+
 static void save_ppm(const char *path)
 {
     static uint32_t px[320 * 240];
@@ -533,6 +559,9 @@ static void usage(void)
         "  --settings PATH file for the game's settings and high scores (default: saves/)\n"
         "  --game-version V  which version to run (as in the menu, e.g. 1.4)\n"
         "  --write-raw PATH  write the disk image out as a raw file and exit\n"
+        "  --build-arm64   cross-compile a cached AArch64 module (for RG34XX / H700)\n"
+        "                  into data-dir/cache/ using Zig or aarch64-linux-gnu-gcc\n"
+        "  --build-arm64-cpu CPU  target CPU for --build-arm64 (default: cortex-a53)\n"
         "  --sound DIR     directory holding the 8 sound ROMs (%s...)\n"
         "  --headless N    run N frames without a window\n"
         "  --shot-every N  in headless mode, save a PPM every N frames\n"
@@ -587,7 +616,7 @@ static int option_values(const char *a, const char *next)
 {
     static const char *const one[] = {
         "--rom", "--game-version", "--game", "--disk", "--settings", "--write-raw", "--sound", "--headless",
-        "--data-dir", "--set",
+        "--data-dir", "--set", "--build-arm64-cpu",
         "--shot-every", "--script", "--trace-from", "--load", "--rewind-test", "--runahead", "--join",
         "--net-host", "--net-join", "--net-delay", "--net-fps", "--net-sim", NULL,
     };
@@ -702,7 +731,8 @@ int main(int argc, char **argv)
             if (!strcmp(argv[i], "--game") && i + 1 < argc) want = argv[i + 1];
             if (!strcmp(argv[i], "--data-dir") && i + 1 < argc) set_data_dir(argv[i + 1]);
             if (!strcmp(argv[i], "--headless") || !strcmp(argv[i], "--recomp") || !strcmp(argv[i], "--dis") ||
-                !strcmp(argv[i], "--write-raw") || !strcmp(argv[i], "--test-shaders")) tool = true;
+                !strcmp(argv[i], "--write-raw") || !strcmp(argv[i], "--test-shaders") ||
+                !strcmp(argv[i], "--build-arm64")) tool = true;
             if (argv[i][0] != '-' && !launch_path) launch_path = argv[i];
             i += option_values(argv[i], i + 1 < argc ? argv[i + 1] : NULL);
         }
@@ -748,7 +778,8 @@ int main(int argc, char **argv)
     const char *rom_path = *cfg.rom ? cfg.rom : NULL;       // NULL: the configured version
     const char *want_version = launch_version() ? launch_version() : cfg.version;   // a clone's zip: its version
     const char *disk_path = *cfg.disk ? cfg.disk : NULL;     // NULL: look for one
-    const char *settings_path = NULL, *write_raw = NULL;
+    const char *settings_path = NULL, *write_raw = NULL, *build_arm64_cpu = "cortex-a53";
+    bool build_arm64 = false;
     const char *sound_dir = *cfg.sound ? cfg.sound : ".";
     int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
     int save_at = 0, rewind_test = 0, runahead = 0;
@@ -766,6 +797,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk_path = argv[++i];
         else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settings_path = argv[++i];
         else if (!strcmp(argv[i], "--write-raw") && i + 1 < argc) write_raw = argv[++i];
+        else if (!strcmp(argv[i], "--build-arm64")) build_arm64 = true;
+        else if (!strcmp(argv[i], "--build-arm64-cpu") && i + 1 < argc) build_arm64_cpu = argv[++i];
         else if (!strcmp(argv[i], "--sound") && i + 1 < argc) sound_dir = argv[++i];
         else if (!strcmp(argv[i], "--headless") && i + 1 < argc) headless = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atoi(argv[++i]);
@@ -790,7 +823,7 @@ int main(int argc, char **argv)
         else if (argv[i] != launch_path) { usage(); return 1; }
     }
 
-    headless_mode = headless || dis_count;
+    headless_mode = headless || dis_count || build_arm64;
     static char rom_buf[4096], disk_buf[4096];
     if (!rom_path) {
         // the configured version, else the first one there is
@@ -860,6 +893,12 @@ int main(int argc, char **argv)
     if (!sound_init(sound_dir))
         report(false, "Some sound ROMs were not found in %s, so the game will run without sound.\n\n%s", sound_dir, files_help());
     if (recomp_args) return recomp_snapshot(recomp_args[0], recomp_args[1], recomp_args[2]);
+    if (build_arm64) {
+        char msg[512];
+        bool ok = rec_build_cross_arm64(build_arm64_cpu, msg, sizeof msg);
+        fprintf(stderr, "rec-arm64: %s\n", msg);
+        return ok ? 0 : 1;
+    }
     check_files(rom_path, sound_dir);
     hw.dsw = getenv("KI2_DSW") ? (uint32_t)strtoul(getenv("KI2_DSW"), 0, 16) : config_dsw();
     hw.instant_disk = getenv("KI2_DISK") ? !strcmp(getenv("KI2_DISK"), "instant") : cfg.disk_speed == 1;

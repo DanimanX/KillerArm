@@ -16,5 +16,7 @@ typedef void (*rec_progress_fn)(const char *stage, double fraction);
 bool rec_build_load_cached(char *msg, size_t msglen);
 // Build (snapshot, translate, compile) and load. Slow: tens of seconds.
 bool rec_build(rec_progress_fn progress, char *msg, size_t msglen);
+// Cross-compile a cached AArch64 module on a desktop host (e.g. for Anbernic RG34XX / H700).
+bool rec_build_cross_arm64(const char *cpu, char *msg, size_t msglen);
 // Load a module file directly (testing).
 bool rec_build_load_file(const char *path, char *err, size_t errlen);

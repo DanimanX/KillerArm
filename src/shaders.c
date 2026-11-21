@@ -15,6 +15,7 @@
 // flips to the screen.
 #include "shaders.h"
 #include "gl_funcs.h"
+#include "video.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -217,11 +218,12 @@ static int scale_type(const char *v)
 
 static GLint wrap_mode(const char *v)
 {
-    if (!v) return GL_CLAMP_TO_BORDER;
+    GLint border = video_is_gles() ? GL_CLAMP_TO_EDGE : GL_CLAMP_TO_BORDER;
+    if (!v) return border;
     if (!strcmp(v, "repeat")) return GL_REPEAT;
     if (!strcmp(v, "mirrored_repeat")) return GL_MIRRORED_REPEAT;
     if (!strcmp(v, "clamp_to_edge")) return GL_CLAMP_TO_EDGE;
-    return GL_CLAMP_TO_BORDER;
+    return border;
 }
 
 /* ---------------------------------------------------------------- */
@@ -233,8 +235,11 @@ static int glsl_version(void)
     static int v = -1;
     if (v < 0) {
         const char *s = (const char *)p_glGetString(0x8B8C /* GL_SHADING_LANGUAGE_VERSION */);
-        int maj = 1, min = 10;
-        if (s) sscanf(s, "%d.%d", &maj, &min);
+        int maj = 1, min = video_is_gles() ? 0 : 10;
+        if (s) {
+            while (*s && !isdigit((unsigned char)*s)) s++;
+            if (*s) sscanf(s, "%d.%d", &maj, &min);
+        }
         v = maj * 100 + min;
     }
     return v;
@@ -269,13 +274,24 @@ static GLuint compile_stage(GLenum type, const char *src, const char *path, char
     // a #version line in the file must come first; otherwise pick one
     char version[64];
     const char *vl = strstr(src, "#version");
-    if (vl) {
+    bool gles = video_is_gles();
+    if (gles) {
+        int want = 100;
+        if (vl) sscanf(vl + 8, "%d", &want);
+        if (want >= 300 && glsl_version() >= 300) snprintf(version, sizeof version, "#version 300 es\n");
+        else snprintf(version, sizeof version, "#version 100\n");
+    } else if (vl) {
         const char *e = strpbrk(vl, "\r\n");
         snprintf(version, sizeof version, "%.*s\n", (int)(e ? e - vl : (long)strlen(vl)), vl);
     } else snprintf(version, sizeof version, "#version %d\n", glsl_version() >= 130 ? 130 : 110);
     char *body = strdup(src);
     if (vl) { char *b = body + (vl - src); while (*b && *b != '\n' && *b != '\r') *b++ = ' '; }
-    const char *defs = type == GL_VERTEX_SHADER ? "#define VERTEX\n#define PARAMETER_UNIFORM\n" : "#define FRAGMENT\n#define PARAMETER_UNIFORM\n";
+    const char *defs;
+    if (gles && type == GL_FRAGMENT_SHADER && !strstr(body, "precision "))
+        defs = "#define FRAGMENT\n#define PARAMETER_UNIFORM\n"
+               "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n";
+    else
+        defs = type == GL_VERTEX_SHADER ? "#define VERTEX\n#define PARAMETER_UNIFORM\n" : "#define FRAGMENT\n#define PARAMETER_UNIFORM\n";
     const char *parts[3] = { version, defs, body };
     GLuint s = p_glCreateShader(type);
     p_glShaderSource(s, 3, parts, NULL);
@@ -401,8 +417,10 @@ static void ensure_fbo(pass_t *ps, int w, int h)
 {
     if (ps->fbo && ps->w == w && ps->h == h) return;
     if (ps->fbo) { p_glDeleteFramebuffers(1, &ps->fbo); p_glDeleteTextures(1, &ps->tex); }
-    GLint fmt = ps->float_fbo ? GL_RGBA16F : ps->srgb_fbo ? GL_SRGB8_ALPHA8 : GL_RGBA8;
-    ps->tex = new_texture(w, h, fmt, ps->float_fbo ? GL_FLOAT : GL_UNSIGNED_BYTE);
+    bool gles = video_is_gles();
+    GLint fmt = gles ? GL_RGBA : (ps->float_fbo ? GL_RGBA16F : ps->srgb_fbo ? GL_SRGB8_ALPHA8 : GL_RGBA8);
+    GLenum type = (!gles && ps->float_fbo) ? GL_FLOAT : GL_UNSIGNED_BYTE;
+    ps->tex = new_texture(w, h, fmt, type);
     p_glGenFramebuffers(1, &ps->fbo);
     p_glBindFramebuffer(GL_FRAMEBUFFER, ps->fbo);
     p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ps->tex, 0);
@@ -433,11 +451,12 @@ shader_param_t *shader_param(int i) { return i >= 0 && i < nparams ? &params[i] 
 
 static const char *stock_src =
     "#if defined(VERTEX)\n"
-    "#if __VERSION__ >= 130\n#define V out\n#define A in\n#else\n#define V varying\n#define A attribute\n#endif\n"
+    "#if __VERSION__ >= 130 && (!defined(GL_ES) || __VERSION__ >= 300)\n#define V out\n#define A in\n#else\n#define V varying\n#define A attribute\n#endif\n"
     "A vec4 VertexCoord; A vec4 TexCoord; V vec2 uv; uniform mat4 MVPMatrix;\n"
     "void main() { gl_Position = MVPMatrix * VertexCoord; uv = TexCoord.xy; }\n"
     "#else\n"
-    "#if __VERSION__ >= 130\n#define V in\nout vec4 FragColor;\n#define T texture\n#else\n#define V varying\n#define FragColor gl_FragColor\n#define T texture2D\n#endif\n"
+    "#ifdef GL_ES\nprecision mediump float;\n#endif\n"
+    "#if __VERSION__ >= 130 && (!defined(GL_ES) || __VERSION__ >= 300)\n#define V in\nout vec4 FragColor;\n#define T texture\n#else\n#define V varying\n#define FragColor gl_FragColor\n#define T texture2D\n#endif\n"
     "V vec2 uv; uniform sampler2D Texture;\n"
     "void main() { FragColor = T(Texture, uv); }\n"
     "#endif\n";
@@ -531,9 +550,10 @@ bool shader_load(const char *path, char *err, size_t errlen)
     for (int i = 0; i < n; i++) { free(srcs[i]); find_uniforms(i); }
 
     if (!hist[0]) for (int i = 0; i < HISTORY; i++) {
-        hist[i] = new_texture(SRC_W, SRC_H, GL_RGBA8, GL_UNSIGNED_BYTE);
+        bool gles = video_is_gles();
+        hist[i] = new_texture(SRC_W, SRC_H, gles ? GL_RGBA : GL_RGBA8, GL_UNSIGNED_BYTE);
         static uint32_t black[SRC_W * SRC_H];
-        p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SRC_W, SRC_H, GL_BGRA, GL_UNSIGNED_BYTE, black);
+        p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SRC_W, SRC_H, gles ? GL_RGBA : GL_BGRA, GL_UNSIGNED_BYTE, black);
     }
     if (!stock_prog) stock_prog = build_program(stock_src, "stock", err, errlen);
     snprintf(current, sizeof current, "%s", path);
@@ -584,10 +604,20 @@ static const GLfloat mvp[16] = { 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0, -1, -1, 0, 
 void shader_render(const uint32_t *px, SDL_Rect vp, int drawable_h)
 {
     if (!npass) return;
+    bool gles = video_is_gles();
     hist_pos = (hist_pos + 1) % HISTORY;
     p_glActiveTexture(GL_TEXTURE0);
     p_glBindTexture(GL_TEXTURE_2D, hist[hist_pos]);
-    p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SRC_W, SRC_H, GL_BGRA, GL_UNSIGNED_BYTE, px);
+    if (gles) {
+        static uint32_t rgba[SRC_W * SRC_H];
+        for (int i = 0; i < SRC_W * SRC_H; i++) {
+            uint32_t p = px[i];
+            rgba[i] = 0xff000000u | ((p & 0xffu) << 16) | (p & 0xff00u) | ((p >> 16) & 0xffu);
+        }
+        p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SRC_W, SRC_H, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    } else {
+        p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SRC_W, SRC_H, GL_BGRA, GL_UNSIGNED_BYTE, px);
+    }
     frame_count++;
     p_glDisable(GL_BLEND);
 
@@ -615,8 +645,10 @@ void shader_render(const uint32_t *px, SDL_Rect vp, int drawable_h)
             p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
             p_glViewport(vp.x, drawable_h - vp.y - vp.h, vp.w, vp.h);
         }
-        if (ps->srgb_fbo && !to_screen) p_glEnable(GL_FRAMEBUFFER_SRGB);
-        else p_glDisable(GL_FRAMEBUFFER_SRGB);
+        if (!gles) {
+            if (ps->srgb_fbo && !to_screen) p_glEnable(GL_FRAMEBUFFER_SRGB);
+            else p_glDisable(GL_FRAMEBUFFER_SRGB);
+        }
 
         p_glUseProgram(ps->prog);
         if (ps->u_mvp >= 0) p_glUniformMatrix4fv(ps->u_mvp, 1, GL_FALSE, mvp);
@@ -650,7 +682,7 @@ void shader_render(const uint32_t *px, SDL_Rect vp, int drawable_h)
 
         if (!to_screen) { in_tex = ps->tex; in_w = ps->w; in_h = ps->h; }
     }
-    p_glDisable(GL_FRAMEBUFFER_SRGB);
+    if (!gles) p_glDisable(GL_FRAMEBUFFER_SRGB);
     if (!to_screen) {
         // the last pass had its own size: scale its output to the screen
         p_glBindFramebuffer(GL_FRAMEBUFFER, 0);

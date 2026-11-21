@@ -96,7 +96,12 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return NULL;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_Window *win = SDL_CreateWindow(PRODUCT, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_RESIZABLE);
+    Uint32 wflags = SDL_WINDOW_RESIZABLE;
+#ifdef UC_HANDHELD
+    wflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    SDL_ShowCursor(SDL_DISABLE);
+#endif
+    SDL_Window *win = SDL_CreateWindow(PRODUCT, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, wflags);
     SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_PRESENTVSYNC) : NULL;
     if (!r && win) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     SDL_Texture *tex = r ? SDL_CreateTexture(r, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, W, H) : NULL;
@@ -248,7 +253,12 @@ bool picker_message(const char *title, const char *text)
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return false;
     int scale = pw * 2 <= 1600 ? 2 : 1;                  // doubled when it fits a laptop screen
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, pw * scale, ph * scale, SDL_WINDOW_RESIZABLE);
+    Uint32 wflags = SDL_WINDOW_RESIZABLE;
+#ifdef UC_HANDHELD
+    wflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    SDL_ShowCursor(SDL_DISABLE);
+#endif
+    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, pw * scale, ph * scale, wflags);
     SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
     if (!r && win) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     SDL_Texture *tex = r ? SDL_CreateTexture(r, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STATIC, pw, ph) : NULL;
@@ -337,7 +347,11 @@ static void welcome_draw(const game_t *const *games, const char *folder, const c
         path_lines(64, y + 22, alt, 0x80c0ff);
     }
     if (*status) centred(WH - 96, status, status_rgb, 2);
+#ifdef UC_HANDHELD
+    centred(WH - 60, "A / START  check again     B / SELECT  quit", 0x909090, 2);
+#else
     centred(WH - 60, "O  open the folder     Enter  check again     Esc  quit", 0x909090, 2);
+#endif
     centred(WH - 34, "File names: README.md, or github.com/thefixinhixon/UltraCombo", 0x606060, 2);
 }
 
@@ -356,7 +370,12 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return -1;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_Window *win = SDL_CreateWindow(PRODUCT, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WW, WH, SDL_WINDOW_RESIZABLE);
+    Uint32 wflags = SDL_WINDOW_RESIZABLE;
+#ifdef UC_HANDHELD
+    wflags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    SDL_ShowCursor(SDL_DISABLE);
+#endif
+    SDL_Window *win = SDL_CreateWindow(PRODUCT, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WW, WH, wflags);
     SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
     if (!r && win) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     SDL_Texture *tex = r ? SDL_CreateTexture(r, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, WW, WH) : NULL;

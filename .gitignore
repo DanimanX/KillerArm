@@ -1,5 +1,5 @@
 /build/
-ultracombo
+/ultracombo
 /run/
 *.ppm
 *.png
@@ -13,6 +13,8 @@ ki2.ini
 shaders/extra/
 ultracombo-dist
 /build-lnx/
+/build-arm64/
+last_game.txt
 ki2
 *.wav
 ki2-dist

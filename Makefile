@@ -171,8 +171,15 @@ package-windows: dist/windows/UltraCombo.exe
 
 packages: package-appimage package-windows
 
+# AArch64 / OpenGL ES 2.0 handheld port (Anbernic RG34XX / H700 / PortMaster)
+arm64 portmaster:
+	sh tools/build-arm64.sh
+
+arm64-cache: ultracombo
+	sh tools/build-arm64-cache.sh
+
 clean:
-	rm -rf build build-win build-lnx dist ultracombo ultracombo-dist
+	rm -rf build build-win build-lnx build-arm64 dist ultracombo ultracombo-dist
 
 # GPL-licensed libretro shaders (xBRZ, crt-guest, crt-royale, ...) for local
 # use: fetched from github.com/libretro/glsl-shaders into deps/.
@@ -198,4 +205,4 @@ shaders-lola:
 	cd $(LOLA_REPO) && (git checkout -q $(LOLA_COMMIT) || (git fetch -q origin && git checkout -q $(LOLA_COMMIT)))
 	python3 tools/lola_retro.py $(LOLA_REPO) shaders/lola-retro
 
-.PHONY: all clean recomp windows shaders-extra shaders-lola package-linux package-appimage package-windows packages
+.PHONY: all clean recomp windows shaders-extra shaders-lola package-linux package-appimage package-windows packages arm64 portmaster arm64-cache

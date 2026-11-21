@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "name": "ultracombo.zip",
+  "items": [
+    "UltraCombo.sh",
+    "ultracombo"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "UltraCombo (KillerArm)",
+    "porter": "KillerArm",
+    "desc": "ARM64 / OpenGL ES 2.0 handheld port of UltraCombo (static recompilation engine for Killer Instinct and Killer Instinct 2 arcade boards), tuned for Anbernic RG34XX (Allwinner H700) and compatible AArch64 PortMaster devices. Bring your own MAME ROMs and CHDs.",
+    "desc_md": null,
+    "inst": "Copy your own legal MAME ROMs and CHD/raw disk images for kinst and/or kinst2 into ports/ultracombo/run/. For locked 60 FPS on Allwinner H700 (Anbernic RG34XX / RG35XX / RG40XX), pre-build the -O2 Cortex-A53 cache module on a PC using tools/build-arm64-cache.sh and copy cache/ into ports/ultracombo/cache/. Without a pre-built cache, TinyCC builds an in-memory fallback on-device.",
+    "inst_md": null,
+    "genres": [
+      "fighting",
+      "arcade"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": null,
+    "reqs": [
+      "opengl",
+      "!lowres"
+    ],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": "2.28"
+  }
+}

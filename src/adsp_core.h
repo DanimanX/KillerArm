@@ -1084,9 +1084,13 @@ ADSP_FN bool irq_raised(void)
 #if defined(__GNUC__) && !defined(__TINYC__)
     __builtin_memcpy(&lo, A.irq_all, 8);
     __builtin_memcpy(&hi, A.irq_all + 8, 4);
-#else
+#elif defined(__x86_64__) || defined(__i386__)
     lo = *(const uint64_t *)A.irq_all;      // x86: unaligned loads are fine
     hi = *(const uint32_t *)(A.irq_all + 8);
+#else
+    lo = 0; hi = 0;
+    for (int i = 0; i < 8; i++) lo |= (uint64_t)A.irq_all[i] << (i * 8);
+    for (int i = 0; i < 4; i++) hi |= (uint32_t)A.irq_all[8 + i] << (i * 8);
 #endif
     return (lo | hi) != 0;
 }
@@ -1125,9 +1129,13 @@ ADSP_FN bool irq_seen(const adsp_irq_seen_t *seen)
 #if defined(__GNUC__) && !defined(__TINYC__)
     __builtin_memcpy(&lo, A.irq_all, 8);
     __builtin_memcpy(&hi, A.irq_all + 8, 4);
-#else
+#elif defined(__x86_64__) || defined(__i386__)
     lo = *(const uint64_t *)A.irq_all;
     hi = *(const uint32_t *)(A.irq_all + 8);
+#else
+    lo = 0; hi = 0;
+    for (int i = 0; i < 8; i++) lo |= (uint64_t)A.irq_all[i] << (i * 8);
+    for (int i = 0; i < 4; i++) hi |= (uint32_t)A.irq_all[8 + i] << (i * 8);
 #endif
     return lo == seen->lo && hi == seen->hi && A.imask == seen->imask && A.icntl == seen->icntl;
 }
@@ -1137,9 +1145,14 @@ ADSP_SLOW void irq_remember(adsp_irq_seen_t *seen)
 #if defined(__GNUC__) && !defined(__TINYC__)
     __builtin_memcpy(&seen->lo, A.irq_all, 8);
     __builtin_memcpy(&seen->hi, A.irq_all + 8, 4);
-#else
+#elif defined(__x86_64__) || defined(__i386__)
     seen->lo = *(const uint64_t *)A.irq_all;
     seen->hi = *(const uint32_t *)(A.irq_all + 8);
+#else
+    uint64_t lo = 0; uint32_t hi = 0;
+    for (int i = 0; i < 8; i++) lo |= (uint64_t)A.irq_all[i] << (i * 8);
+    for (int i = 0; i < 4; i++) hi |= (uint32_t)A.irq_all[8 + i] << (i * 8);
+    seen->lo = lo; seen->hi = hi;
 #endif
     seen->imask = A.imask;
     seen->icntl = A.icntl;

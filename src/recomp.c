@@ -17,8 +17,13 @@
 #define RAM0_BYTES 0x80000u
 #define RAM2_BYTES 0x800000u
 #define VECTOR 0x80000180u
+#ifdef UC_HANDHELD
+#define FILE_BYTES (96 * 1024)     // smaller units keep on-device compiler RAM under 1 GB
+#define MAX_FILES 100
+#else
 #define FILE_BYTES (200 * 1024)    // split the output so it compiles in parallel
 #define MAX_FILES 60
+#endif
 #define SLOTS (RAM2_BYTES / 4)
 
 enum { K_NONE, K_B, K_BL, K_J, K_JAL, K_JR, K_JALR, K_ERET };

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./UltraCombo.sh</path>
+    <name>UltraCombo</name>
+    <desc>Native ARM64 / OpenGL ES 2.0 port of UltraCombo, running Killer Instinct (1994) and Killer Instinct 2 (1996) via static MIPS R4600 and ADSP-2105 recompilation. Bring your own MAME ROMs and CHD disk images.</desc>
+    <releasedate>19941028T000000</releasedate>
+    <developer>Rare / Midway (Engine: thefixinhixon, ARM64 Port: KillerArm)</developer>
+    <publisher>PortMaster</publisher>
+    <genre>Fighting</genre>
+    <players>1-2</players>
+  </game>
+</gameList>

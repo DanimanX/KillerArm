@@ -8,11 +8,19 @@
 #include <string.h>
 
 #define ROM_WORDS   0x800000u          // 16 MB 16-bit region, EPROMs on the low byte
+#define ROM_BYTES   0x400000u          // 8 x 512 KB EPROMs stored densely (saves 12 MB RAM)
 #define BANK_WORDS  0x1000u
 #define RING        65536
 
-static uint16_t *rom;
+static uint8_t *rom;
 static bool roms_ok;
+
+static inline uint16_t rom_word(uint32_t idx)
+{
+    idx &= ROM_WORDS - 1;
+    if (idx & 0x80000u) return 0xffff;
+    return (uint16_t)(0xff00u | rom[((idx >> 20) << 19) | (idx & 0x7ffffu)]);
+}
 
 static struct {                        // board state (saved in save states)
     uint32_t ext_pm[0x800];            // 2K x 24-bit, shared program/data RAM
@@ -50,11 +58,13 @@ static struct {                        // output to the host's audio, not machin
 static void boot(void)
 {
     // ADSP-21xx boot format: 4 bytes per instruction (MSB first), page length in byte 3
-    const uint16_t *src = &rom[(d.bank * BANK_WORDS) % ROM_WORDS];
+    uint32_t base = (uint32_t)d.bank * BANK_WORDS;
     uint32_t *ipm = adsp_internal_pm();
-    int words = ((src[3] & 0xff) + 1) * 8;
+    int words = ((rom_word(base + 3) & 0xff) + 1) * 8;
     for (int i = 0; i < words && i < 0x400; i++)
-        ipm[i] = (uint32_t)(src[i * 4] & 0xff) << 16 | (uint32_t)(src[i * 4 + 1] & 0xff) << 8 | (src[i * 4 + 2] & 0xff);
+        ipm[i] = (uint32_t)(rom_word(base + (uint32_t)i * 4) & 0xff) << 16 |
+                 (uint32_t)(rom_word(base + (uint32_t)i * 4 + 1) & 0xff) << 8 |
+                 (rom_word(base + (uint32_t)i * 4 + 2) & 0xff);
     adsp_code_reload();
 }
 
@@ -90,7 +100,7 @@ static void pm_write(uint16_t addr, uint32_t v)
 static uint16_t dm_read(uint16_t addr)
 {
     if (addr < 0x2000) return (uint16_t)(d.ext_pm[addr & 0x7ff] >> 8);
-    if (addr < 0x3000) return rom[((uint32_t)d.bank * BANK_WORDS + (addr - 0x2000)) % ROM_WORDS];
+    if (addr < 0x3000) return rom_word((uint32_t)d.bank * BANK_WORDS + (addr - 0x2000));
     if (addr >= 0x3400 && addr < 0x3800) {
         // reading the input latch acknowledges it
         d.input_full = false;
@@ -130,17 +140,14 @@ static void reboot(void)
     boot();
 }
 
-static bool load_rom(const char *dir, const char *name, uint32_t word_offset)
+static bool load_rom(const char *dir, const char *name, uint32_t byte_offset)
 {
     char path[4096];
     snprintf(path, sizeof path, "%s/%s", dir, name);
     FILE *f = fopen(path, "rb");
     if (!f) { perror(path); return false; }
-    uint8_t *buf = malloc(0x80000);
-    size_t n = fread(buf, 1, 0x80000, f);
+    size_t n = fread(rom + byte_offset, 1, 0x80000, f);
     fclose(f);
-    for (size_t i = 0; i < n; i++) rom[word_offset + i] = 0xff00 | buf[i];
-    free(buf);
     return n == 0x80000;
 }
 
@@ -148,11 +155,11 @@ bool sound_init(const char *rom_dir)
 {
     const char *const *names = game.sound_roms;
     output.log = getenv("KI2_LOG_SOUND") != NULL;
-    rom = malloc(ROM_WORDS * sizeof(uint16_t));
-    for (uint32_t i = 0; i < ROM_WORDS; i++) rom[i] = 0xffff;
+    rom = malloc(ROM_BYTES);
+    memset(rom, 0xff, ROM_BYTES);
     bool ok = true;
     for (int i = 0; i < 8; i++)
-        ok &= load_rom(rom_dir, names[i], (uint32_t)i * 0x100000u);
+        ok &= load_rom(rom_dir, names[i], (uint32_t)i * 0x80000u);
     if (!ok) fprintf(stderr, "dcs: sound ROMs missing, running silent\n");
     roms_ok = ok;
 
@@ -217,12 +224,14 @@ int sound_code_images(adsprec_image_t *out, int max)
     int n = 0;
     for (int i = 0; roms_ok && i < 6 && n < max && (game.sound_code[i].words || game.sound_code[i].boot); i++) {
         uint32_t at = game.sound_code[i].rom;
-        int len = game.sound_code[i].boot ? ((rom[at + 3] & 0xff) + 1) * 8 : game.sound_code[i].words;
+        int len = game.sound_code[i].boot ? ((rom_word(at + 3) & 0xff) + 1) * 8 : game.sound_code[i].words;
         if (game.sound_code[i].boot && len > 0x400) len = 0x400;
         if (len > 0x800) len = 0x800;
         for (int k = 0; k < len; k++) {
-            const uint16_t *w = &rom[(at + 4 * (uint32_t)k) % ROM_WORDS];
-            words[n][k] = (uint32_t)(w[0] & 0xff) << 16 | (uint32_t)(w[1] & 0xff) << 8 | (w[2] & 0xff);
+            uint32_t a = at + 4u * (uint32_t)k;
+            words[n][k] = (uint32_t)(rom_word(a) & 0xff) << 16 |
+                          (uint32_t)(rom_word(a + 1) & 0xff) << 8 |
+                          (rom_word(a + 2) & 0xff);
         }
         out[n] = (adsprec_image_t){ game.sound_code[i].pm, (uint16_t)len, words[n] };
         n++;

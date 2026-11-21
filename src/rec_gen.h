@@ -22,17 +22,28 @@ static void rec_bind_(const rec_host_t *h)
     rec_dirty_ = h->ram_dirty;
 }
 
+static inline uint32_t rec_host_code_lo_(const rec_host_t *h) { return *h->code_lo; }
+static inline uint32_t rec_host_code_sz_(const rec_host_t *h) { return *h->code_size; }
+static inline uint64_t *rec_host_deadline_(const rec_host_t *h) { return h->deadline; }
+static inline bool *rec_host_irq_(const rec_host_t *h) { return h->irq_dirty; }
+
 #define REC_LOCALS cpu_t *const cpu_l_ = rec_cpu_; uint8_t *const ram_l_ = rec_ram_; \
-                   uint8_t *const dirty_l_ = rec_dirty_; (void)cpu_l_; (void)ram_l_; (void)dirty_l_;
+                   uint8_t *const dirty_l_ = rec_dirty_; \
+                   uint32_t const code_lo_l_ = rec_host_code_lo_(rec_host_); \
+                   uint32_t const code_sz_l_ = rec_host_code_sz_(rec_host_); \
+                   uint64_t *const deadline_p_ = rec_host_deadline_(rec_host_); \
+                   bool *const irq_p_ = rec_host_irq_(rec_host_); \
+                   (void)cpu_l_; (void)ram_l_; (void)dirty_l_; (void)code_lo_l_; \
+                   (void)code_sz_l_; (void)deadline_p_; (void)irq_p_;
 #define cpu (*cpu_l_)
 #define ram ram_l_
 #define ram_dirty dirty_l_
 #define tlbc (rec_host_->tlbc)
-#define rec_code_lo (*rec_host_->code_lo)
-#define rec_code_size (*rec_host_->code_size)
-#define irq_dirty (*rec_host_->irq_dirty)
+#define rec_code_lo code_lo_l_
+#define rec_code_size code_sz_l_
+#define irq_dirty (*irq_p_)
 #define cpu_exc (*rec_host_->cpu_exc)
-#define rec_deadline (*rec_host_->deadline)
+#define rec_deadline (*deadline_p_)
 #define rec_load (*rec_host_->load)
 #define rec_store (*rec_host_->store)
 #define rec_op (*rec_host_->op)
@@ -68,11 +79,19 @@ static void rec_mul64(uint64_t a, uint64_t b, uint64_t *hi, uint64_t *lo)
 #define REC_STORE(T, p, v) memcpy((p), &(v), sizeof(T))
 #endif
 
+#if defined(__GNUC__) && !defined(__TINYC__)
+#define REC_LIKELY(x) __builtin_expect(!!(x), 1)
+#define REC_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define REC_LIKELY(x) (x)
+#define REC_UNLIKELY(x) (x)
+#endif
+
 #define R cpu.r
 #define SX32(x) ((uint64_t)(int64_t)(int32_t)(x))
 #define EXIT(t) do { cpu.pc = (t); cpu.npc = (t) + 4; return; } while (0)
 // at a backward branch: give the dispatcher a chance to take interrupts / end the slice
-#define STOP() (cpu.cycles >= rec_deadline || irq_dirty)
+#define STOP() REC_UNLIKELY(cpu.cycles >= rec_deadline || irq_dirty)
 
 static inline void rec_mult(uint64_t rs, uint64_t rt)
 {
@@ -143,29 +162,37 @@ static inline void rec_ddivu(uint64_t rs, uint64_t rt)
 // KSEG0/1 RAM directly (ram0 and ram2 are contiguous in `ram`), mapped
 // addresses through the TLB page cache. Stores into the code image take the
 // slow path so they invalidate it.
+static inline uint8_t *rec_tlbc_rd_(const tlbc_t *t, uint32_t a)
+{
+    const tlbc_t *e = &t[(a >> 12) & (TLBC_SIZE - 1)];
+    return (e->tag == (a >> 12) + 1 && e->rd) ? e->rd + (a & 0xfff) : (uint8_t *)0;
+}
+static inline uint8_t *rec_tlbc_wr_(const tlbc_t *t, uint32_t a)
+{
+    const tlbc_t *e = &t[(a >> 12) & (TLBC_SIZE - 1)];
+    return (e->tag == (a >> 12) + 1 && e->wr) ? e->wr + (a & 0xfff) : (uint8_t *)0;
+}
 #define REC_PA(a) ((a) & 0x1fffffffu)
-#define REC_TLBC(a, wr) (tlbc[((a) >> 12) & (TLBC_SIZE - 1)].tag == ((a) >> 12) + 1 &&             \
-        tlbc[((a) >> 12) & (TLBC_SIZE - 1)].wr ? tlbc[((a) >> 12) & (TLBC_SIZE - 1)].wr + ((a) & 0xfff) : (uint8_t *)0)
-#define rec_ld_ptr_(a) (((a) & 0xc0000000u) != 0x80000000u ? REC_TLBC(a, rd) :                     \
+#define rec_ld_ptr_(a) (REC_UNLIKELY(((a) & 0xc0000000u) != 0x80000000u) ? rec_tlbc_rd_(tlbc, a) : \
         REC_PA(a) < RAM0_SIZE ? ram + REC_PA(a) :                                                   \
         REC_PA(a) - 0x08000000u < RAM2_SIZE ? ram + RAM0_SIZE + (REC_PA(a) - 0x08000000u) : (uint8_t *)0)
-#define rec_st_ptr_(a) (((a) & 0xc0000000u) != 0x80000000u ? REC_TLBC(a, wr) :                     \
+#define rec_st_ptr_(a) (REC_UNLIKELY(((a) & 0xc0000000u) != 0x80000000u) ? rec_tlbc_wr_(tlbc, a) : \
         REC_PA(a) < RAM0_SIZE ? ram + REC_PA(a) :                                                   \
-        REC_PA(a) - rec_code_lo < rec_code_size ? (uint8_t *)0 :                                    \
+        REC_UNLIKELY(REC_PA(a) - rec_code_lo < rec_code_size) ? (uint8_t *)0 :                      \
         REC_PA(a) - 0x08000000u < RAM2_SIZE ? ram + RAM0_SIZE + (REC_PA(a) - 0x08000000u) : (uint8_t *)0)
 // every store into RAM marks its page for save states and rollback
 #define ram_touch_(p) (ram_dirty[(size_t)((p) - ram) >> 12] = 1)
 
 #define LD(T, dst, va, size, PC, DL) do {                                   \
         uint32_t _a = (va); uint8_t *_p = rec_ld_ptr_(_a); T _v;             \
-        if (_p && !(_a & (size - 1))) REC_LOAD(T, _v, _p);                    \
-        else { _v = (T)rec_load(_a, size, PC, DL); if (cpu_exc) return; }    \
+        if (REC_LIKELY(_p && !(_a & (size - 1)))) REC_LOAD(T, _v, _p);       \
+        else { _v = (T)rec_load(_a, size, PC, DL); if (REC_UNLIKELY(cpu_exc)) return; } \
         dst;                                                                 \
     } while (0)
 #define ST(T, val, va, size, PC, DL) do {                                   \
         uint32_t _a = (va); uint8_t *_p = rec_st_ptr_(_a); T _v = (T)(val);  \
-        if (_p && !(_a & (size - 1))) { REC_STORE(T, _p, _v); ram_touch_(_p); } \
-        else { rec_store(_a, (uint64_t)_v, size, PC, DL); if (cpu_exc) return; } \
+        if (REC_LIKELY(_p && !(_a & (size - 1)))) { REC_STORE(T, _p, _v); ram_touch_(_p); } \
+        else { rec_store(_a, (uint64_t)_v, size, PC, DL); if (REC_UNLIKELY(cpu_exc)) return; } \
     } while (0)
 
 // Unaligned LWL/LWR/SWL/SWR/LDL/LDR/SDL/SDR: read (and write back) the

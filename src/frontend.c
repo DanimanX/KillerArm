@@ -40,7 +40,8 @@
 
 static SDL_Window *win;
 static SDL_AudioDeviceID adev;
-static uint32_t px[320 * 240];     // game image
+static uint32_t px[320 * 240];     // game image (for libretro shaders / screenshots)
+static uint16_t px565[320 * 240];  // fast RGB565 game image (half upload bandwidth on GLES)
 static uint32_t ov[320 * 240];     // overlay: messages, menu, input display
 
 static bool paused, step_once, fullscreen, muted, vsync;
@@ -201,7 +202,7 @@ static void perf_emu(uint64_t start)
 
 static double queued_ms(void);
 
-static void draw_perf(uint32_t *ov)
+static void perf_tick(void)
 {
     uint64_t now = SDL_GetPerformanceCounter(), f = SDL_GetPerformanceFrequency();
     perf.frames++;
@@ -214,6 +215,10 @@ static void draw_perf(uint32_t *ov)
         perf.emu_acc = 0;
         perf.t0 = now;
     }
+}
+
+static void draw_perf(uint32_t *ov)
+{
     if (!cfg.perf_overlay) return;
     char l1[48], l2[48];
     snprintf(l1, sizeof l1, "%.1f FPS  AUDIO %.0f MS", perf.fps, queued_ms());
@@ -226,16 +231,28 @@ static void draw_perf(uint32_t *ov)
     osd_text(ov, 320 - w + 1, 240 - 23, l2, 0x80ff80);
 }
 
+static bool menu_open;
+
 static void present(const char *status)
 {
     if (!status) status = training_status();
-    to_rgb(px);
-    osd_clear(ov);
-    draw_inputs(ov);
-    draw_perf(ov);
-    draw_menu(ov);
-    osd_draw(ov, status);           // after the menu: messages show over it too
-    video_present(px, ov, cfg.filter, cfg.scale_mode);
+    perf_tick();
+    bool has_ov = menu_open || cfg.input_display || cfg.perf_overlay ||
+                  (status && *status) || osd_message_active();
+    if (has_ov) {
+        osd_clear(ov);
+        draw_inputs(ov);
+        draw_perf(ov);
+        draw_menu(ov);
+        osd_draw(ov, status);           // after the menu: messages show over it too
+    }
+    if (shader_active()) {
+        to_rgb(px);
+        video_present(px, has_ov ? ov : NULL, cfg.filter, cfg.scale_mode);
+    } else {
+        to_rgb565(px565);
+        video_present_565(px565, has_ov ? ov : NULL, cfg.filter, cfg.scale_mode);
+    }
 }
 
 static void screenshot(void)
@@ -682,7 +699,7 @@ static int versions_there(void)
 
 enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_CHANGE, M_QUIT, M_COUNT };
 // Graphics
-enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
+enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_FRAMESKIP, G_PERF, G_BACK, G_COUNT };
 // Controls
 enum { C_P1PAD, C_P2PAD, C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_P1LABELS, C_P2LABELS, C_BACK, C_COUNT };
 // Game & system
@@ -692,7 +709,7 @@ enum { T_TRAINING, T_REFILL, T_P2HEALTH, T_POWER, T_INPUTS, T_RECORD, T_PLAY, T_
 // Netplay
 enum { N_HOST, N_JOIN, N_ADDRESS, N_PORT, N_DELAY, N_DISCONNECT, N_BACK, N_COUNT };
 
-static bool menu_open, menu_changed, quit_requested;
+static bool menu_changed, quit_requested;
 static int menu_page, menu_sel;
 static int editing = -1;             // N_ADDRESS or N_PORT while typing into it
 static char edit_buf[256];
@@ -859,6 +876,7 @@ static void draw_menu(uint32_t *out)
         snprintf(b[G_PACING], 72, "Frame pacing\t< %s%s >", pacing_names[cfg.pacing],
                  cfg.pacing == PACING_AUDIO ? "" : vsync_broken ? ": not working" :
                  cfg.pacing == PACING_AUTO ? (vsync ? ": vsync" : ": audio") : "");
+        snprintf(b[G_FRAMESKIP], 72, "Frameskip\t< %s >", cfg.frameskip ? "Auto" : "Off");
         snprintf(b[G_PERF], 72, "Performance overlay\t%s", onoff[cfg.perf_overlay]);
         snprintf(b[G_BACK], 72, "Back");
         pad_prompt_adjust_footer(&pad_prompt, prompt_override(), footer, sizeof footer);
@@ -1104,6 +1122,7 @@ static void menu_change(int dir)
         }
         case G_PARAMS: if (!dir && shader_param_count()) go(PG_PARAMS, 0); return;
         case G_PACING: cycle(&cfg.pacing, 3, d); vsync_broken = false; choose_pacing(); break;   // a choice: try vsync again
+        case G_FRAMESKIP: cfg.frameskip = !cfg.frameskip; break;
         case G_PERF: cfg.perf_overlay = !cfg.perf_overlay; break;
         case G_BACK: if (!dir) go(PG_MAIN, M_GRAPHICS); return;
         }
@@ -1210,8 +1229,8 @@ static void menu_change(int dir)
             hw.instant_disk = cfg.disk_speed == 1;          // the drive needs no power-cycle
             break;
         case S_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
-        case S_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); break;
-        case S_REWIND: cfg.rewind = !cfg.rewind; if (!in_netplay()) apply_rewind_setting(); break;
+        case S_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); if (cfg.run_ahead && !in_netplay()) state_init(); break;
+        case S_REWIND: cfg.rewind = !cfg.rewind; if (!in_netplay()) { if (cfg.rewind) state_init(); apply_rewind_setting(); } break;
         case S_BACK: if (!dir) go(PG_MAIN, M_GAME); return;
         }
         break;
@@ -1459,8 +1478,9 @@ static bool handle_events(void)
     return !quit_requested;
 }
 
-// One real frame of the game: inputs, emulation, and a checkpoint for
-// rollback/rewind. Every emulated frame must end in a checkpoint.
+// One real frame of the game: inputs, emulation, and a checkpoint when
+// rollback/rewind/netplay needs it. Skipping checkpoints when none of those
+// are enabled saves ~17 MB RAM and ~2 ms/frame on Cortex-A53 handhelds.
 static void emulate_frame(void)
 {
     uint64_t t0 = SDL_GetPerformanceCounter();
@@ -1472,7 +1492,7 @@ static void emulate_frame(void)
     set_ports(held);
     training_apply(true);
     run_frame();
-    state_checkpoint();
+    if (cfg.rewind || cfg.run_ahead > 0 || netplay_running()) state_checkpoint();
     frame_count++;
     rumble_check();
     perf_emu(t0);
@@ -1578,13 +1598,21 @@ static void prepare_progress(const char *stage, double fraction)
     while (SDL_PollEvent(&ev)) if (ev.type == SDL_CONTROLLERDEVICEADDED) pad_added(ev.cdevice.which);
     memset(px, 0, sizeof px);
     osd_clear(ov);
-    osd_box(ov, 30, 70, 260, 100, 0xf0101018u);
-    osd_text(ov, 160 - 21 * 3, 80, "PREPARING THE GAME", 0xffc040);
-    osd_text(ov, 160 - 25 * 3, 96, "FOR THIS PC (FIRST RUN)", 0xb0b0b0);
-    osd_text(ov, 160 - (int)strlen(stage) * 3, 118, stage, 0xffffff);
-    osd_box(ov, 50, 136, 220, 10, 0xff303040u);
-    osd_box(ov, 51, 137, (int)(218 * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)), 8, 0xffc08020u);
-    osd_text(ov, 160 - 24 * 3, 154, "THIS TAKES ABOUT A MINUTE", 0x808080);
+    osd_box(ov, 24, 66, 272, 108, 0xf0101018u);
+    osd_text(ov, 160 - 18 * 3, 76, "PREPARING THE GAME", 0xffc040);
+#ifdef UC_HANDHELD
+    osd_text(ov, 160 - 20 * 3, 92, "FIRST RUN (ONE TIME)", 0xb0b0b0);
+#else
+    osd_text(ov, 160 - 23 * 3, 92, "FOR THIS PC (FIRST RUN)", 0xb0b0b0);
+#endif
+    osd_text(ov, 160 - (int)strlen(stage) * 3, 114, stage, 0xffffff);
+    osd_box(ov, 50, 132, 220, 10, 0xff303040u);
+    osd_box(ov, 51, 133, (int)(218 * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)), 8, 0xffc08020u);
+#ifdef UC_HANDHELD
+    osd_text(ov, 160 - 30 * 3, 152, "TIP: PRE-BUILD ON PC FOR 60FPS", 0x808080);
+#else
+    osd_text(ov, 160 - 25 * 3, 152, "THIS TAKES ABOUT A MINUTE", 0x808080);
+#endif
     video_present(px, ov, FILTER_SHARP, cfg.scale_mode);
 }
 
@@ -1599,9 +1627,11 @@ static void prepare_game_code(void)
     bool ok = rec_build(prepare_progress, msg, sizeof msg);
     fprintf(stderr, "rec: %s (%.0f s)\n", msg, (SDL_GetTicks64() - t0) / 1000.0);
     osd_message("%s", ok ? "Ready" : "Running without translated code (slower)");
+#ifndef UC_HANDHELD
     if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, game.product,
         "The game code could not be prepared for full speed on this PC, so the game runs on the "
         "slower interpreter. The .log file and cache/*/build.log in the game folder say why.", win);
+#endif
 }
 
 /* ---------------------------------------------------------------- */
@@ -1643,7 +1673,13 @@ int frontend_main(void)
         }
     }
     fprintf(stderr, "video: %s\n", video_backend());
+#ifdef UC_HANDHELD
+    fullscreen = true;
+    SDL_ShowCursor(SDL_DISABLE);
+    if (!cfg.fullscreen) set_fullscreen(false);
+#else
     if (cfg.fullscreen) set_fullscreen(true);
+#endif
     choose_pacing();
     apply_rewind_setting();
 
@@ -1742,8 +1778,10 @@ int frontend_main(void)
         // that (the games load and decode movies between scenes), it's paused
         // for a second rather than starving the audio and dropping frames.
         static int ahead_paused;
+        static bool skipped_last;
         if (ahead && last_emu_ms * (ahead + 1) > 0.8 * 1000 / FRAME_HZ) ahead_paused = 60;
         if (ahead_paused) { ahead_paused--; ahead = 0; }
+        bool skip_draw = cfg.frameskip && !skipped_last && last_emu_ms > (1000.0 / FRAME_HZ) * 0.92;
         if (vsync) {
             if (!vsync_lock) {
                 // vsync on a display that isn't ~60 Hz: tear-free, but a frame
@@ -1769,11 +1807,13 @@ int frontend_main(void)
             if (err < -1) err = -1;
             // locked: frames come display_hz times a second, so resample to match
             pump_audio(false, (vsync_lock ? display_hz / FRAME_HZ : 1) * (1 + 0.005 * err));
-            present_ahead(ahead);
+            if (skip_draw) skipped_last = true;
+            else { skipped_last = false; present_ahead(ahead); }
         } else {
             emulate_frame();
             pump_audio(false, 1);
-            present_ahead(ahead);
+            if (skip_draw) skipped_last = true;
+            else { skipped_last = false; present_ahead(ahead); }
             if (adev) {
                 // the audio device is the clock: keep `latency` ms queued, run ahead otherwise
                 while (queued_ms() > latency) SDL_Delay(1);

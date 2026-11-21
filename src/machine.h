@@ -15,6 +15,7 @@ void machine_reset(void);             // power-cycle the cabinet
 void machine_run_inputs(const uint16_t in[2], bool resim);
 void machine_netplay_reset(void);
 void to_rgb(uint32_t *dst);           // current 320x240 frame as 0x00RRGGBB
+void to_rgb565(uint16_t *dst);        // current 320x240 frame as RGB565 (fast path for GLES/handhelds)
 const char *base_dir(void);           // directory of the executable, with trailing separator
 const char *data_dir(void);           // writable folder for settings, cache, states (trailing separator)
 const char *find_data(const char *name, char *buf, size_t n);
