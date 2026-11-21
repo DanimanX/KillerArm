@@ -94,21 +94,25 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           FILES="dist/UltraCombo-PortMaster-aarch64.zip dist/UltraCombo-PortMaster-aarch64.zip.sha256"
+          cat > dist/release-notes.md <<'EOF'
+          Automated AArch64 / OpenGL ES 2.0 / NEON PortMaster build of UltraCombo tuned for Anbernic RG34XX (Allwinner H700) and compatible ARM64 handhelds.
+
+          ### Contents
+          - `UltraCombo.sh` (PortMaster launcher with `performance` CPU governor)
+          - `ultracombo/ultracombo.aarch64` (ARM64 Cortex-A53, OpenGL ES 2.0, NEON, max `GLIBC_2.17`)
+          - `ultracombo/tools/tcc/libtcc.so` (AArch64 TinyCC fallback, max `GLIBC_2.17`)
+          - Lightweight permissive CRT shaders & PortMaster metadata
+
+          ### Quick Setup (BYOD — No ROMs Included)
+          1. Extract `UltraCombo-PortMaster-aarch64.zip` into your handheld's `ports/` folder.
+          2. Copy your own legal MAME `kinst` and/or `kinst2` ROMs + CHD/raw disk images into `ports/ultracombo/run/`.
+          3. *(Recommended for locked 60 FPS on H700)* Pre-build the `-O2` Cortex-A53 cache on a PC with `tools/build-arm64-cache.sh` and copy `cache/rec-*-aarch64.so` into `ports/ultracombo/cache/`.
+          EOF
+          sed -i 's/^          //' dist/release-notes.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $FILES --clobber
           else
             gh release create "$TAG" $FILES \
               --title "KillerArm $TAG (ARM64 / Anbernic RG34XX PortMaster)" \
-              --notes "Automated AArch64 / OpenGL ES 2.0 / NEON PortMaster build of UltraCombo tuned for Anbernic RG34XX (Allwinner H700) and compatible ARM64 handhelds.
-
-### Contents
-- \`UltraCombo.sh\` (PortMaster launcher with \`performance\` CPU governor)
-- \`ultracombo/ultracombo.aarch64\` (ARM64 Cortex-A53, OpenGL ES 2.0, NEON, max \`GLIBC_2.17\`)
-- \`ultracombo/tools/tcc/libtcc.so\` (AArch64 TinyCC fallback, max \`GLIBC_2.17\`)
-- Lightweight permissive CRT shaders & PortMaster metadata
-
-### Quick Setup (BYOD — No ROMs Included)
-1. Extract \`UltraCombo-PortMaster-aarch64.zip\` into your handheld's \`ports/\` folder.
-2. Copy your own legal MAME \`kinst\` and/or \`kinst2\` ROMs + CHD/raw disk images into \`ports/ultracombo/run/\`.
-3. *(Recommended for locked 60 FPS on H700)* Pre-build the \`-O2\` Cortex-A53 cache on a PC with \`tools/build-arm64-cache.sh\` and copy \`cache/rec-*-aarch64.so\` into \`ports/ultracombo/cache/\`."
+              --notes-file dist/release-notes.md
           fi
