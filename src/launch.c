@@ -231,3 +231,56 @@ const game_t *launch_open(const char *path, char *err, size_t n)
 bool launch_active(void) { return active; }
 const char *launch_dir(int i) { return active && i >= 0 && i < ndirs ? dirs[i] : NULL; }
 const char *launch_version(void) { return version; }
+
+void launch_scan_folder_zips(const char *folder)
+{
+    if (!folder || !*folder) return;
+    for (int i = 0; game_profiles[i]; i++) {
+        const game_t *g = game_profiles[i];
+        char zip_path[4200];
+        snprintf(zip_path, sizeof zip_path, "%s/%s.zip", folder, g->set);
+        if (!exists(zip_path)) {
+            snprintf(zip_path, sizeof zip_path, "%s/%s.ZIP", folder, g->set);
+            if (!exists(zip_path)) continue;
+        }
+        fprintf(stderr, "launch: auto-extracting %s...\n", zip_path);
+        zip_t z;
+        memset(&z, 0, sizeof z);
+        if (!(z.f = fopen(zip_path, "rb"))) { fprintf(stderr, "launch: failed to fopen %s\n", zip_path); continue; }
+        fseek(z.f, 0, SEEK_END);
+        long size = ftell(z.f);
+        z.z.m_pRead = zip_read;
+        z.z.m_pIO_opaque = z.f;
+        if (size <= 0 || !mz_zip_reader_init(&z.z, (mz_uint64)size, 0)) {
+            fprintf(stderr, "launch: mz_zip_reader_init failed (size=%ld)\n", size);
+            fclose(z.f);
+            continue;
+        }
+
+        for (int v = 0; v < 4 && g->versions[v].label; v++) {
+            int idx = zip_find(&z, g->versions[v].crc, FILE_SIZE, g->versions[v].rom);
+            if (idx >= 0) {
+                char out[4400];
+                snprintf(out, sizeof out, "%s/%s", folder, g->versions[v].rom);
+                unpack(&z, idx, out);
+            }
+        }
+        for (int s = 0; s < 8; s++) {
+            int idx = zip_find(&z, g->sound_crc[s], FILE_SIZE, g->sound_roms[s]);
+            if (idx >= 0) {
+                char out[4400];
+                snprintf(out, sizeof out, "%s/%s", folder, g->sound_roms[s]);
+                unpack(&z, idx, out);
+            }
+        }
+        char chd_out[4400];
+        snprintf(chd_out, sizeof chd_out, "%s/%s", folder, g->chd);
+        if (!exists(chd_out)) {
+            int idx = zip_find(&z, 0, 0, g->chd);
+            if (idx >= 0) unpack(&z, idx, chd_out);
+        }
+
+        mz_zip_reader_end(&z.z);
+        fclose(z.f);
+    }
+}

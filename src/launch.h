@@ -12,3 +12,4 @@ const game_t *launch_open(const char *path, char *err, size_t n);
 bool launch_active(void);                 // launch_open succeeded
 const char *launch_dir(int i);            // folders to look in first, NULL after the last
 const char *launch_version(void);         // the only version the launched zip holds, else NULL
+void launch_scan_folder_zips(const char *folder); // auto-unpack ROM chips from kinst.zip / kinst2.zip

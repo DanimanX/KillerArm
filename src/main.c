@@ -109,8 +109,15 @@ static char *data_dir_given;          // --data-dir
 
 // --data-dir: everything the program writes goes in this one folder (made if
 // needed), and its run/ is searched for the game files. Before data_dir() is used.
+// A launcher may pass its own folder: if the program already sits inside it,
+// keep the executable's own folder instead. Beside the program is always
+// writable there, and it is the folder the firmware's own paths (and the SD
+// card) really use, whatever mount point or symlink got it launched.
 static void set_data_dir(const char *p)
 {
+    const char *base = base_dir();
+    size_t bl = strlen(base);
+    if (bl > 1 && base[bl - 1] == '/' && !strncmp(p, base, bl - 1)) p = base;
     size_t n = strlen(p);
     data_dir_given = SDL_malloc(n + 2);
     memcpy(data_dir_given, p, n + 1);
@@ -745,6 +752,14 @@ int main(int argc, char **argv)
                 return 1;
             }
             if (!want) want = g->id;
+        } else {
+            char run_folder[4200];
+            snprintf(run_folder, sizeof run_folder, "%srun", data_dir());
+            launch_scan_folder_zips(run_folder);
+            if (strcmp(base_dir(), data_dir())) {
+                snprintf(run_folder, sizeof run_folder, "%srun", base_dir());
+                launch_scan_folder_zips(run_folder);
+            }
         }
         if (!choose_game(want, tool)) return 0;
     }

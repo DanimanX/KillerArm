@@ -20,12 +20,32 @@ source "$controlfolder/control.txt"
 get_controls
 
 GAMEDIR="/$directory/ports/ultracombo"
+# Some firmwares (Knulli) launch a port from its real folder and may not define
+# $directory the way PortMaster does. The port's own folder is where this
+# script lives, so use that when the constructed one is not there.
+if [ ! -d "$GAMEDIR" ]; then
+  GAMEDIR="$(cd "$(dirname "$0")" && pwd)/ultracombo"
+fi
 cd "$GAMEDIR" || exit 1
 
-> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
+> "$GAMEDIR/log.txt" 2>/dev/null || true
+exec > >(tee "$GAMEDIR/log.txt") 2>&1 || exec >> "$GAMEDIR/log.txt" 2>&1
 
 echo "=== UltraCombo ARM64 (KillerArm) ==="
 echo "Device: ${DEVICE_NAME:-unknown}  CFW: ${CFW_NAME:-unknown}  Arch: $(uname -m)"
+
+# Auto-extract ROM chips from any MAME zip in run/ if not already extracted
+if [ -d "$GAMEDIR/run" ]; then
+  for zipfile in "$GAMEDIR"/run/*.zip "$GAMEDIR"/run/*.ZIP; do
+    [ -f "$zipfile" ] || continue
+    if command -v unzip >/dev/null 2>&1; then
+      echo "Unpacking ROM files from $(basename "$zipfile")..."
+      unzip -n -q "$zipfile" "*.u*" -d "$GAMEDIR/run" 2>/dev/null || true
+      unzip -n -q "$zipfile" "u*-*" -d "$GAMEDIR/run" 2>/dev/null || true
+      unzip -n -q "$zipfile" "*_l1.*" -d "$GAMEDIR/run" 2>/dev/null || true
+    fi
+  done
+fi
 
 # Use the firmware's hardware-accelerated SDL2/Mali libraries; only append
 # optional port-local libraries after system paths.

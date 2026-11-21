@@ -3,6 +3,7 @@
 #include "version.h"
 #include "controller_labels.h"
 #include "icon.h"
+#include "launch.h"
 #include "osd.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -422,8 +423,12 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
                 break;
             }
         }
-        if (check && found()) ok = done = true;
-        else if (check) { status = "Still no game files there: check the folder and the file names"; status_rgb = 0xc05050; }
+        if (check) {
+            launch_scan_folder_zips(folder);
+            if (alt && *alt) launch_scan_folder_zips(alt);
+            if (found()) ok = done = true;
+            else { status = "Still no game files there: check the folder and the file names"; status_rgb = 0xc05050; }
+        }
         welcome_draw(games, folder, alt, status, status_rgb);
         SDL_UpdateTexture(tex, NULL, wpx, WW * 4);
         SDL_RenderClear(r);

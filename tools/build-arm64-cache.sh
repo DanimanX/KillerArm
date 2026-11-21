@@ -27,12 +27,18 @@ fi
 BUILT=0
 for g in ki1 ki2; do
     if [ "$g" = ki1 ]; then
+        SET=kinst
         CHECK="$DATA_DIR/run/ki-l15d.u98"
         CHECK2="$DATA_DIR/run/ki-l14.u98"
     else
+        SET=kinst2
         CHECK="$DATA_DIR/run/ki2-l14.u98"
         CHECK2=""
     fi
+    # The launcher keeps each set's ROMs in its own folder (run/kinst2/...);
+    # a flat run/ works too.
+    [ -f "$CHECK" ] || CHECK="$DATA_DIR/run/$SET/$(basename "$CHECK")"
+    if [ -n "$CHECK2" ] && [ ! -f "$CHECK2" ]; then CHECK2="$DATA_DIR/run/$SET/$(basename "$CHECK2")"; fi
     if [ -f "$CHECK" ] || { [ -n "$CHECK2" ] && [ -f "$CHECK2" ]; }; then
         echo "=== Cross-building AArch64 ($CPU, -O2) cache for $g ==="
         ./ultracombo --game "$g" --data-dir "$DATA_DIR" --build-arm64 --build-arm64-cpu "$CPU"
