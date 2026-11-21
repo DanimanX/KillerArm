@@ -1796,7 +1796,6 @@ int frontend_main(void)
         static bool skipped_last;
         if (ahead && last_emu_ms * (ahead + 1) > 0.8 * 1000 / FRAME_HZ) ahead_paused = 60;
         if (ahead_paused) { ahead_paused--; ahead = 0; }
-        bool skip_draw = cfg.frameskip && !skipped_last && last_emu_ms > (1000.0 / FRAME_HZ) * 0.92;
         if (vsync) {
             if (!vsync_lock) {
                 // vsync on a display that isn't ~60 Hz: tear-free, but a frame
@@ -1822,15 +1821,23 @@ int frontend_main(void)
             if (err < -1) err = -1;
             // locked: frames come display_hz times a second, so resample to match
             pump_audio(false, (vsync_lock ? display_hz / FRAME_HZ : 1) * (1 + 0.005 * err));
+            bool skip_draw = cfg.frameskip && !skipped_last && last_emu_ms > (1000.0 / FRAME_HZ) * 0.90;
             if (skip_draw) skipped_last = true;
             else { skipped_last = false; present_ahead(ahead); }
         } else {
             emulate_frame();
             pump_audio(false, 1);
+            bool skip_draw = cfg.frameskip && !skipped_last && last_emu_ms > (1000.0 / FRAME_HZ) * 0.90;
             if (skip_draw) skipped_last = true;
             else { skipped_last = false; present_ahead(ahead); }
             if (adev) {
                 // the audio device is the clock: keep `latency` ms queued, run ahead otherwise
+                double q = queued_ms();
+                if (q < 5) {        // pad with silence after a heavy frame to prevent crackling
+                    static int16_t silence[AUDIO_HZ / 10];
+                    int n = AUDIO_HZ * latency / 2000;
+                    SDL_QueueAudio(adev, silence, (Uint32)(n < AUDIO_HZ / 10 ? n : AUDIO_HZ / 10) * 2);
+                }
                 while (queued_ms() > latency) SDL_Delay(1);
             } else {
                 next += (uint64_t)(freq / FRAME_HZ);

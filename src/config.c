@@ -106,15 +106,15 @@ static void build_table(void)
     add_str("video", "shader_params", cfg.shader_params, "", "adjusted shader parameters (set from the menu)");
     add("video", "filter", T_ENUM, &cfg.filter, "sharp",
         "sharp (crisp pixels), smooth (sharpened bicubic), scanlines, crt (scanlines, mask, curvature)", filter_names);
-#ifdef UC_HANDHELD
-    add("video", "pacing", T_ENUM, &cfg.pacing, "audio",
-#else
     add("video", "pacing", T_ENUM, &cfg.pacing, "auto",
-#endif
         "audio: original 58.96 Hz timed by the sound card; vsync: tear-free, one frame per refresh on"
         " ~60 Hz displays (smooth, game runs 1.7% fast), timed by the clock on others; auto: vsync on ~60 Hz displays, else audio",
         pacing_names);
+#ifdef UC_HANDHELD
+    add("video", "frameskip", T_BOOL, &cfg.frameskip, "yes",
+#else
     add("video", "frameskip", T_BOOL, &cfg.frameskip, "no",
+#endif
         "auto frameskip (max 1 consecutive skip) if a heavy frame exceeds budget on low-power handhelds", 0);
 
     add("audio", "volume", T_INT, &cfg.volume, "100", "0-100", 0);

@@ -33,7 +33,9 @@ static uint8_t tracked[IDE_TRACK_BYTES];   // sectors 0-63, the authoritative co
 static bool tracked_unsaved;
 
 // Image blocks, read as needed: 16 KB of a raw file, or one CHD hunk.
-#define CACHE_SLOTS 64
+// 1024 slots keep entire looping FMV stage backgrounds in RAM (~4 MB for CHD,
+// ~16 MB for raw) to eliminate SD card reads and real-time CHD decompression spikes.
+#define CACHE_SLOTS 1024
 static uint32_t block_bytes;
 static struct { uint64_t at; uint8_t *data; } cache[CACHE_SLOTS];
 
