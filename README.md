@@ -1,5 +1,7 @@
 # KillerArm — UltraCombo ARM64 / Anbernic RG34XX Port
 
+[![Build ARM64 PortMaster](https://github.com/DanimanX/KillerArm/actions/workflows/build-arm64.yml/badge.svg)](https://github.com/DanimanX/KillerArm/actions/workflows/build-arm64.yml)
+
 An **ARM64 (AArch64) & OpenGL ES 2.0** handheld port of [UltraCombo](https://github.com/thefixinhixon/UltraCombo) (the static-recompilation native engine for **Killer Instinct** (1994) and **Killer Instinct 2** (1996) arcade boards), specifically engineered and tuned for the **Anbernic RG34XX** (Allwinner H700, 720×480 3:2 GBA form factor) and compatible Linux **PortMaster** handhelds.
 
 > **Bring Your Own Data (BYOD):** No copyrighted ROMs, CHD disk images, or recompiled game code are included in this repository or its releases. You must supply your own legally obtained MAME `kinst` and/or `kinst2` ROM sets and CHD/raw disk images.

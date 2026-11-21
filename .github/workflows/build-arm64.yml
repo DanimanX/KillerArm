@@ -1,0 +1,114 @@
+# Automatically builds and verifies the AArch64 / OpenGL ES 2.0 PortMaster
+# package (Anbernic RG34XX / Allwinner H700 and compatible ARM64 handhelds),
+# runs native state tests, and publishes GitHub Releases on version tags (v*).
+#
+# No copyrighted ROMs, CHDs, or recompiled game code are ever included.
+name: Build ARM64 PortMaster
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_cpu:
+        description: 'Target ARM64 CPU (cortex_a53 for RG34XX/H700, cortex_a55 for RK3566, generic)'
+        required: false
+        default: 'cortex_a53'
+
+permissions:
+  contents: write
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update -q
+          sudo apt-get -o Acquire::Retries=3 install -qy --no-install-recommends \
+            build-essential python3 curl git tar xz-utils zip file binutils pkg-config libsdl2-dev
+
+      - name: Cache cross-compile dependencies (Zig, SDL2 headers, TinyCC)
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            !deps/zig-cache
+          key: arm64-deps-${{ hashFiles('tools/build-arm64.sh') }}
+
+      - name: Run native state-file tests and desktop build check
+        run: |
+          make -j"$(nproc)" test-state-files ultracombo
+
+      - name: Cross-compile AArch64 binary, TinyCC and PortMaster package
+        env:
+          TARGET_CPU: ${{ github.event.inputs.target_cpu || 'cortex_a53' }}
+        run: |
+          chmod +x portmaster/UltraCombo.sh tools/build-arm64.sh tools/build-arm64-cache.sh
+          make portmaster
+          (cd dist && sha256sum UltraCombo-PortMaster-aarch64.zip > UltraCombo-PortMaster-aarch64.zip.sha256)
+          ls -lh dist/
+
+      - name: Verify AArch64 -nostdlib REC_MODULE & ADSP codegen
+        run: |
+          cat > build-arm64/ci_rec_test.c <<'EOF'
+          #include "rec_gen.h"
+          const rec_host_t *rec_host_;
+          cpu_t *rec_cpu_;
+          uint8_t *rec_ram_, *rec_dirty_;
+          void ci_fn(void) {
+              REC_LOCALS
+              R[1] = SX32((uint32_t)R[2] + (uint32_t)R[3]);
+              LD(uint32_t, R[4] = SX32(_v), (uint32_t)(R[1] + 4), 4, 0x88000000u, false);
+              ST(uint32_t, R[4], (uint32_t)(R[1] + 8), 4, 0x88000004u, false);
+              if (STOP()) EXIT(0x88000000u);
+              EXIT(0x88000008u);
+          }
+          EOF
+          deps/zig-linux/zig cc -target aarch64-linux-gnu.2.28 -mcpu=cortex_a53 -O2 \
+            -fno-strict-aliasing -fPIC -fvisibility=hidden -fno-stack-protector \
+            -DREC_MODULE -Isrc -c build-arm64/ci_rec_test.c -o build-arm64/ci_rec_test.o
+          deps/zig-linux/zig cc -target aarch64-linux-gnu.2.28 -shared -nostdlib \
+            build-arm64/ci_rec_test.o -o build-arm64/ci_rec_test.so
+          file build-arm64/ci_rec_test.so | grep -q "ARM aarch64"
+
+      - name: Upload PortMaster artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UltraCombo-PortMaster-aarch64
+          path: |
+            dist/UltraCombo-PortMaster-aarch64.zip
+            dist/UltraCombo-PortMaster-aarch64.zip.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          FILES="dist/UltraCombo-PortMaster-aarch64.zip dist/UltraCombo-PortMaster-aarch64.zip.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
+          else
+            gh release create "$TAG" $FILES \
+              --title "KillerArm $TAG (ARM64 / Anbernic RG34XX PortMaster)" \
+              --notes "Automated AArch64 / OpenGL ES 2.0 / NEON PortMaster build of UltraCombo tuned for Anbernic RG34XX (Allwinner H700) and compatible ARM64 handhelds.
+
+### Contents
+- \`UltraCombo.sh\` (PortMaster launcher with \`performance\` CPU governor)
+- \`ultracombo/ultracombo.aarch64\` (ARM64 Cortex-A53, OpenGL ES 2.0, NEON, max \`GLIBC_2.17\`)
+- \`ultracombo/tools/tcc/libtcc.so\` (AArch64 TinyCC fallback, max \`GLIBC_2.17\`)
+- Lightweight permissive CRT shaders & PortMaster metadata
+
+### Quick Setup (BYOD — No ROMs Included)
+1. Extract \`UltraCombo-PortMaster-aarch64.zip\` into your handheld's \`ports/\` folder.
+2. Copy your own legal MAME \`kinst\` and/or \`kinst2\` ROMs + CHD/raw disk images into \`ports/ultracombo/run/\`.
+3. *(Recommended for locked 60 FPS on H700)* Pre-build the \`-O2\` Cortex-A53 cache on a PC with \`tools/build-arm64-cache.sh\` and copy \`cache/rec-*-aarch64.so\` into \`ports/ultracombo/cache/\`."
+          fi

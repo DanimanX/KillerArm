@@ -5,11 +5,9 @@
 #
 # No game files are involved: the packages hold no game code, which each
 # player's copy builds at first launch.
-name: Release
+name: Desktop Release (Manual)
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
