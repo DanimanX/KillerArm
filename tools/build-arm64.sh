@@ -218,8 +218,8 @@ rm -rf "$out" "$zipout"
 mkdir -p "$out/ultracombo/run" "$out/ultracombo/cache" "$out/ultracombo/tools/tcc" \
          "$out/ultracombo/libs.aarch64" "$out/ultracombo/licenses"
 
-cp portmaster/UltraCombo.sh "$out/UltraCombo.sh"
-chmod +x "$out/UltraCombo.sh"
+cp portmaster/*.sh "$out/"
+chmod +x "$out/"*.sh
 cp portmaster/ultracombo/port.json "$out/ultracombo/"
 cp portmaster/ultracombo/gameinfo.xml "$out/ultracombo/"
 cp "$bdir/ultracombo.aarch64" "$out/ultracombo/ultracombo.aarch64"
@@ -249,7 +249,7 @@ cp -r shaders/crt/shaders/* "$out/ultracombo/shaders/crt/shaders/" 2>/dev/null |
 echo "TinyCC source: https://repo.or.cz/tinycc.git, commit e23dabe (cross-compiled unmodified for aarch64)" > "$out/ultracombo/tools/tcc/SOURCE.txt"
 
 if command -v zip >/dev/null 2>&1; then
-    (cd "$out" && zip -qr9 "$zipout" UltraCombo.sh ultracombo)
+    (cd "$out" && zip -qr9 "$zipout" *.sh ultracombo)
     echo "Packaged: $zipout ($(du -h "$zipout" | cut -f1))"
 else
     python3 -c "import shutil; shutil.make_archive('${zipout%.zip}', 'zip', '$out')"

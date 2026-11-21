@@ -4,6 +4,7 @@
 #include "controller_labels.h"
 #include "icon.h"
 #include "launch.h"
+#include "machine.h"
 #include "osd.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -95,7 +96,12 @@ static void draw(const game_t *const *games, const bool *installed, int sel, con
 
 const game_t *picker_choose(const game_t *const *games, const bool *installed, int initial)
 {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return NULL;
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK) != 0) return NULL;
+    char db_buf[4096];
+    const char *db = find_data("gamecontrollerdb.txt", db_buf, sizeof db_buf);
+    if (db && *db) SDL_GameControllerAddMappingsFromFile(db);
+    const char *env_map = getenv("SDL_GAMECONTROLLERCONFIG");
+    if (env_map && *env_map) SDL_GameControllerAddMapping(env_map);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     Uint32 wflags = SDL_WINDOW_RESIZABLE;
 #ifdef UC_HANDHELD
@@ -122,7 +128,15 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
     for (int i = 0; i < 2; i++) icon_pixels_text(icons[i], ICON, games[i]->icon_text);
 
     SDL_GameController *pads[8];
-    int npads = 0;
+    SDL_Joystick *joys[8];
+    int npads = 0, njoys = 0;
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        if (SDL_IsGameController(i)) {
+            if (npads < 8 && (pads[npads] = SDL_GameControllerOpen(i))) npads++;
+        } else {
+            if (njoys < 8 && (joys[njoys] = SDL_JoystickOpen(i))) njoys++;
+        }
+    }
     pad_prompt_t prompt;
     pad_prompt_init(&prompt);
     int sel = initial == 1 ? 1 : 0;
@@ -139,6 +153,11 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
             case SDL_QUIT: done = true; break;
             case SDL_CONTROLLERDEVICEADDED:
                 if (npads < 8 && (pads[npads] = SDL_GameControllerOpen(ev.cdevice.which))) npads++;
+                break;
+            case SDL_JOYDEVICEADDED:
+                if (!SDL_IsGameController(ev.jdevice.which) && njoys < 8) {
+                    if ((joys[njoys] = SDL_JoystickOpen(ev.jdevice.which))) njoys++;
+                }
                 break;
             case SDL_KEYDOWN:
                 switch (ev.key.keysym.sym) {
@@ -160,6 +179,23 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
                 case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: move = 1; break;
                 case SDL_CONTROLLER_BUTTON_A: case SDL_CONTROLLER_BUTTON_START: go = true; break;
                 case SDL_CONTROLLER_BUTTON_B: case SDL_CONTROLLER_BUTTON_BACK: done = true; break;
+                }
+                break;
+            case SDL_JOYBUTTONDOWN:
+                // Any button press on unmapped joysticks confirms
+                go = true;
+                break;
+            case SDL_JOYHATMOTION:
+                if (ev.jhat.value & SDL_HAT_LEFT) move = -1;
+                else if (ev.jhat.value & SDL_HAT_RIGHT) move = 1;
+                else if (ev.jhat.value & (SDL_HAT_UP | SDL_HAT_DOWN)) go = true;
+                break;
+            case SDL_JOYAXISMOTION:
+                if (ev.jaxis.axis == 0) {
+                    if (ev.jaxis.value < -16000 || ev.jaxis.value > 16000) {
+                        if (!axis_held) move = ev.jaxis.value < 0 ? -1 : 1;
+                        axis_held = true;
+                    } else axis_held = false;
                 }
                 break;
             case SDL_CONTROLLERAXISMOTION:
@@ -191,6 +227,7 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
         SDL_Delay(10);
     }
     for (int i = 0; i < npads; i++) SDL_GameControllerClose(pads[i]);   // the game opens its own
+    for (int i = 0; i < njoys; i++) SDL_JoystickClose(joys[i]);
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(win);
@@ -369,7 +406,12 @@ static bool open_folder(const char *dir)
 
 int picker_welcome(const game_t *const *games, const char *folder, const char *alt, bool (*found)(void))
 {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return -1;
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK) != 0) return -1;
+    char db_buf[4096];
+    const char *db = find_data("gamecontrollerdb.txt", db_buf, sizeof db_buf);
+    if (db && *db) SDL_GameControllerAddMappingsFromFile(db);
+    const char *env_map = getenv("SDL_GAMECONTROLLERCONFIG");
+    if (env_map && *env_map) SDL_GameControllerAddMapping(env_map);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     Uint32 wflags = SDL_WINDOW_RESIZABLE;
 #ifdef UC_HANDHELD
@@ -395,6 +437,17 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
     }
     for (int i = 0; i < 2; i++) icon_pixels_text(icons[i], ICON, games[i]->icon_text);
 
+    SDL_GameController *wpads[8];
+    SDL_Joystick *wjoys[8];
+    int nwpads = 0, nwjoys = 0;
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        if (SDL_IsGameController(i)) {
+            if (nwpads < 8 && (wpads[nwpads] = SDL_GameControllerOpen(i))) nwpads++;
+        } else {
+            if (nwjoys < 8 && (wjoys[nwjoys] = SDL_JoystickOpen(i))) nwjoys++;
+        }
+    }
+
     const char *status = "";
     uint32_t status_rgb = 0;
     bool done = false, ok = false;
@@ -404,7 +457,14 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
             case SDL_QUIT: done = true; break;
-            case SDL_CONTROLLERDEVICEADDED: SDL_GameControllerOpen(ev.cdevice.which); break;
+            case SDL_CONTROLLERDEVICEADDED:
+                if (nwpads < 8 && (wpads[nwpads] = SDL_GameControllerOpen(ev.cdevice.which))) nwpads++;
+                break;
+            case SDL_JOYDEVICEADDED:
+                if (!SDL_IsGameController(ev.jdevice.which) && nwjoys < 8) {
+                    if ((wjoys[nwjoys] = SDL_JoystickOpen(ev.jdevice.which))) nwjoys++;
+                }
+                break;
             case SDL_KEYDOWN:
                 if (ev.key.keysym.sym == SDLK_ESCAPE) done = true;
                 if (ev.key.keysym.sym == SDLK_o) {
@@ -421,6 +481,9 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
                 if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_A || ev.cbutton.button == SDL_CONTROLLER_BUTTON_START) check = true;
                 if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_B || ev.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) done = true;
                 break;
+            case SDL_JOYBUTTONDOWN:
+                check = true;
+                break;
             }
         }
         if (check) {
@@ -436,6 +499,8 @@ int picker_welcome(const game_t *const *games, const char *folder, const char *a
         SDL_RenderPresent(r);
         SDL_Delay(30);
     }
+    for (int i = 0; i < nwpads; i++) SDL_GameControllerClose(wpads[i]);
+    for (int i = 0; i < nwjoys; i++) SDL_JoystickClose(wjoys[i]);
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(win);
